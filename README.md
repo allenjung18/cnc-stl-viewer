@@ -17,17 +17,26 @@ Files: binary and ASCII STL, and 3MF (core spec: mesh objects, components and bu
 
 ## Development
 
-Requires Node 22.12 or newer.
+Requires Node 22.18.0 or newer (`engines` in `package.json`; `npm run fixtures` runs a TypeScript file directly).
 
 ```sh
 npm ci
-npm run dev        # http://127.0.0.1:5173
-npm test           # unit tests (Vitest, headless)
-npm run lint       # ESLint + type check
-npm run build      # type check + production build into dist/
+npm run dev          # http://127.0.0.1:5173
+npm run preview      # serve the production build from dist/ (run npm run build first)
+npm test             # unit tests (Vitest, headless)
+npm run test:watch   # Vitest in watch mode
+npm run typecheck    # tsc --noEmit
+npm run lint         # ESLint + type check
+npm run build        # type check + production build into dist/
 npx playwright install chromium   # once
-npm run e2e        # browser tests (Playwright); the large-file test writes a 100 MB STL under test-results/ at run time
-npm run fixtures   # rewrite the small committed STL and 3MF fixtures
+npm run e2e          # browser tests (Playwright); the large-file test writes a 100 MB STL under test-results/ at run time
+npm run fixtures     # rewrite the small committed STL and 3MF fixtures
 ```
 
 Everything runs locally; there is no backend.
+
+## Docs
+
+- [docs/TRY-IT.md](docs/TRY-IT.md): a hand acceptance guide (what to drop, what you should see) and how to report what broke.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the modules, the load pipeline, the frames and units, the fit model, persistence.
+- [docs/TESTING.md](docs/TESTING.md): the unit and browser tests, the fixtures, and how to read the counts.
