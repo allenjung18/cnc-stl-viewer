@@ -29,9 +29,26 @@
       #units-hint { flex-basis: 100%; margin: 0; }
       #units-hint[hidden] { display: none; }
       #units-hint[data-tone='warn'] { color: #ffd479; }
+      #stock { margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid #3a4048; }
+      #stock h2 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+      #stock fieldset { margin: 6px 0 0; padding: 4px 6px 6px; border: 1px solid #3a4048; border-radius: 4px; }
+      #stock legend { padding: 0 4px; color: #8b96a3; }
+      #stock .row { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+      #stock label { white-space: nowrap; }
+      #stock input[type='number'] { width: 4.6em; font: inherit; }
+      #stock select { font: inherit; }
+      #stock [hidden] { display: none; }
+      #fit-info { margin-bottom: 6px; }
+      #fit-verdict { display: block; margin: 4px 0 0; font-weight: 600; }
+      #fit-verdict span { display: block; }
+      #fit-verdict[data-tone='ok'] { color: #8fd18f; }
+      #fit-verdict[data-tone='warn'] { color: #ffd479; }
+      #fit-verdict[data-tone='bad'] { color: #ff8a80; }
       #load-status { margin: 8px 0 0; }
       #load-status:empty { display: none; }
       #load-status.error { color: #ff8a80; }
+      /* On a phone the panel keeps the top of the screen and leaves the middle to the view. */
+      @media (max-width: 600px) { #panel { max-height: 40vh; } }
       #drop-overlay {
         position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none;
         background: rgba(111, 168, 220, 0.18); outline: 3px dashed #6fa8dc; outline-offset: -12px;
@@ -57,6 +74,56 @@
         <dt>Format</dt><dd><output id="part-format" data-testid="part-format">–</output></dd>
         <dt>Triangles</dt><dd><output id="part-triangles" data-testid="part-triangles">–</output></dd>
       </dl>
+      <section id="stock" aria-label="Stock">
+        <h2>Stock</h2>
+        <output id="fit-verdict" data-testid="fit-verdict" aria-live="polite"></output>
+        <dl id="fit-info"></dl>
+        <div class="row" role="radiogroup" aria-label="Stock size">
+          <label><input id="stock-mode-auto" data-testid="stock-mode-auto" type="radio" name="stock-mode" value="auto" checked /> Part + allowance</label>
+          <label><input id="stock-mode-fixed" data-testid="stock-mode-fixed" type="radio" name="stock-mode" value="fixed" /> Fixed block</label>
+        </div>
+        <fieldset>
+          <legend>Allowance per side, mm</legend>
+          <div class="row">
+            <label>X/Y <input id="allowance-xy" data-testid="allowance-xy" type="number" step="any" value="3" min="0" /></label>
+            <label>top <input id="allowance-top" data-testid="allowance-top" type="number" step="any" value="1" min="0" /></label>
+            <label>bottom <input id="allowance-bottom" data-testid="allowance-bottom" type="number" step="any" value="2" min="0" /></label>
+          </div>
+        </fieldset>
+        <fieldset id="stock-size" hidden>
+          <legend>Block X × Y × Z, mm</legend>
+          <div class="row">
+            <label>X <input id="stock-size-x" data-testid="stock-size-x" type="number" step="any" value="25" min="0" /></label>
+            <label>Y <input id="stock-size-y" data-testid="stock-size-y" type="number" step="any" value="25" min="0" /></label>
+            <label>Z <input id="stock-size-z" data-testid="stock-size-z" type="number" step="any" value="25" min="0" /></label>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Stock on the bed (front-left corner), mm</legend>
+          <div class="row">
+            <label>X <input id="stock-bed-x" data-testid="stock-bed-x" type="number" step="any" value="0" /></label>
+            <label>Y <input id="stock-bed-y" data-testid="stock-bed-y" type="number" step="any" value="0" /></label>
+          </div>
+        </fieldset>
+        <div class="row" style="margin-top: 6px">
+          <label>WCS origin
+            <select id="wcs-origin" data-testid="wcs-origin">
+              <option value="bottom-left-front-top" selected>front-left corner, Z0 on top</option>
+              <option value="center-top">centre, Z0 on top</option>
+            </select>
+          </label>
+        </div>
+        <fieldset>
+          <legend><label><input id="keep-out-on" data-testid="keep-out-on" type="checkbox" /> Keep-out box on the bed</label></legend>
+          <div id="keep-out-fields" class="row" hidden>
+            <label>X <input id="keep-out-x" data-testid="keep-out-x" type="number" step="any" value="0" /></label>
+            <label>Y <input id="keep-out-y" data-testid="keep-out-y" type="number" step="any" value="0" /></label>
+            <label>width <input id="keep-out-w" data-testid="keep-out-w" type="number" step="any" value="20" min="0" /></label>
+            <label>depth <input id="keep-out-d" data-testid="keep-out-d" type="number" step="any" value="20" min="0" /></label>
+            <label>height <input id="keep-out-h" data-testid="keep-out-h" type="number" step="any" value="10" min="0" /></label>
+          </div>
+        </fieldset>
+      </section>
       <p id="load-status" role="status" aria-live="polite"></p>
     </aside>
     <div id="drop-overlay" hidden>Drop the STL to load it</div>

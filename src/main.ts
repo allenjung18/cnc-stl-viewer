@@ -1,13 +1,16 @@
+import { checkFit, type FitReport } from './geom/fit';
 import { scaleStats, unitHint, unitScaleOf, type UnitChoice } from './geom/units';
 import { loadStl } from './io/load';
 import { StlError, type StlFormat } from './io/sniff';
-import type { MeshStats } from './state/model';
+import type { MachineProfile, MeshStats, Vec3 } from './state/model';
 import { browserStorage, loadUnits, saveUnits } from './state/prefs';
 import { DEFAULT_PROFILE } from './state/profiles';
 import { installDropzone } from './ui/dropzone';
 import { InspectorPanel, partRows, uninspectedRows, UnitsBadge, unitsBadge, type PanelRow } from './ui/panel';
+import { fitRows, fitVerdict, readStockForm, StockPanel } from './ui/stockPanel';
 import { buildPartMesh, NON_MANIFOLD_EDGE_COLOR, OPEN_EDGE_COLOR, type PartMesh } from './view/partMesh';
 import { buildScene } from './view/scene';
+import { buildKeepOutMesh, buildStockMesh } from './view/stockMesh';
 import { Viewport } from './view/viewport';
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -37,6 +40,45 @@ let units: UnitChoice = loadUnits(storage);
 
 const setStatus = (text: string, isError = false): void => panel.setStatus(text, isError);
 
+// The stock, the keep-out box and the WCS origin follow the stock inputs and the part's size in mm.
+const stockMesh = buildStockMesh();
+const keepOutMesh = buildKeepOutMesh();
+machine.scene.add(stockMesh.object, keepOutMesh.object);
+let profile: MachineProfile = DEFAULT_PROFILE;
+let fit: FitReport | null = null;
+const stockPanel = new StockPanel(byId('stock'), () => render());
+
+/** The part's size as shown, mm: the inspected size when there is one, else the mesh's box; both × the units scale. */
+function partSizeMm(scale: number): Vec3 | null {
+  if (!part) return null;
+  const size = fileStats ? scaleStats(fileStats, scale).size : part.size.map((v) => v * scale);
+  return [size[0]!, size[1]!, size[2]!];
+}
+
+/** Sizes the stock, runs the fit checks, and draws the stock, the keep-out box, the part placement and the verdict. */
+function renderFit(scale: number): void {
+  const form = readStockForm(stockPanel.read());
+  if (!form.ok) {
+    fit = null;
+    stockMesh.update({ stockBox: null, wcs: null, failed: false });
+    stockPanel.show(fitVerdict(null, form.errors), []);
+    return;
+  }
+  profile = { ...DEFAULT_PROFILE, keepOut: form.keepOut };
+  keepOutMesh.update(form.keepOut);
+  try {
+    fit = checkFit({ partSize: partSizeMm(scale), stock: form.stock, setup: form.setup, profile });
+  } catch (e) {
+    fit = null;
+    stockMesh.update({ stockBox: null, wcs: null, failed: false });
+    stockPanel.show(fitVerdict(null, [e instanceof Error ? e.message : String(e)]), []);
+    return;
+  }
+  stockMesh.update({ stockBox: fit.stockBox, wcs: fit.wcs, failed: !fit.fits });
+  part?.setPlacement(fit.partOnBed ?? [0, 0, 0]);
+  stockPanel.show(fitVerdict(fit), fitRows(fit));
+}
+
 const unitsBadgeEl = new UnitsBadge(
   byId('units-value'),
   byId<HTMLButtonElement>('units-toggle'),
@@ -59,6 +101,7 @@ function render(): void {
       : uninspectedRows(shown.name, shown.format, shown.triangles, shown.inspectionError ?? 'unknown error');
     panel.show(rows);
   }
+  renderFit(scale);
   viewport.requestRender();
 }
 render();
@@ -116,6 +159,15 @@ if (import.meta.env.DEV) {
     },
     get units() {
       return units;
+    },
+    stockMesh,
+    keepOutMesh,
+    /** The last fit report, or null when the inputs are invalid. */
+    get fit() {
+      return fit;
+    },
+    get profile() {
+      return profile;
     },
   };
 }

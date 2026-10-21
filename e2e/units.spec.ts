@@ -44,7 +44,7 @@ test('inch cube: the hint shows, ×25.4 rescales size, volume and mesh, and the 
   await expect(page.getByTestId('units-hint')).toBeVisible();
   await expect(field(page, 'size')).toHaveText('1 × 1 × 1 mm');
   await expect(field(page, 'volume')).toHaveText('1 mm³');
-  close((await drawn(page)).max, [1, 1, 1]);
+  close((await drawn(page)).max, [4, 4, 3]); // at (3, 3, 2) in its stock
 
   await page.getByTestId('units-toggle').click();
   await expect(page.getByTestId('units-value')).toHaveText('inches (×25.4)');
@@ -55,8 +55,8 @@ test('inch cube: the hint shows, ×25.4 rescales size, volume and mesh, and the 
   await expect(field(page, 'area')).toHaveText('3,870.96 mm²');
   const after = await drawn(page);
   expect(after).toMatchObject({ scale: 25.4, units: 'in' });
-  close(after.min, [0, 0, 0]);
-  close(after.max, [25.4, 25.4, 25.4]);
+  close(after.min, [3, 3, 2]); // the stock grows with the part; the part keeps its offset
+  close(after.max, [28.4, 28.4, 27.4]);
   expect(Math.abs(after.volume - 16387.064)).toBeLessThanOrEqual(1e-6);
 
   // A reload keeps the choice: the next part loads as inches.
@@ -65,12 +65,12 @@ test('inch cube: the hint shows, ×25.4 rescales size, volume and mesh, and the 
   await expect(page.getByTestId('units-value')).toHaveText('inches (×25.4)');
   await load(page, 'inch-cube.stl');
   await expect(field(page, 'size')).toHaveText('25.4 × 25.4 × 25.4 mm');
-  close((await drawn(page)).max, [25.4, 25.4, 25.4]);
+  close((await drawn(page)).max, [28.4, 28.4, 27.4]);
 
   // And back to mm, which is kept too.
   await page.getByTestId('units-toggle').click();
   await expect(field(page, 'size')).toHaveText('1 × 1 × 1 mm');
-  close((await drawn(page)).max, [1, 1, 1]);
+  close((await drawn(page)).max, [4, 4, 3]); // at (3, 3, 2) in its stock
   await page.reload();
   await page.waitForFunction(() => '__stlViewer' in window);
   await expect(page.getByTestId('units-value')).toHaveText('mm (STL has no units)');

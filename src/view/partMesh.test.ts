@@ -61,6 +61,28 @@ describe('buildPartMesh', () => {
     expect(new Box3().setFromObject(part.object).max.toArray()).toEqual([1, 1, 1]);
   });
 
+  it('setPlacement puts the min corner at the point, at any unit scale, and the edge overlays follow', () => {
+    const positions = positionsOf('open-box.stl');
+    const part = buildPartMesh(positions, inspectMesh(positions));
+    part.setPlacement([3, 3, 2]);
+    expect(new Box3().setFromObject(part.object).min.toArray()).toEqual([3, 3, 2]);
+    expect(part.placement).toEqual([3, 3, 2]);
+    part.setUnitScale(2);
+    const world = new Box3().setFromObject(part.object);
+    expect(world.min.toArray()).toEqual([3, 3, 2]);
+    expect(world.max.toArray()).toEqual([43, 43, 42]);
+    const rim = new Box3().setFromObject(part.openEdges!);
+    expect(rim.min.toArray()).toEqual([3, 3, 42]); // the open top's rim, moved with the part
+  });
+
+  it('setPlacement refuses a non-finite point and keeps the last one', () => {
+    const part = buildPartMesh(positionsOf('cube-20mm-binary.stl'));
+    part.setPlacement([1, 2, 3]);
+    for (const bad of [Number.NaN, Infinity, -Infinity]) expect(() => part.setPlacement([bad, 0, 0])).toThrow(RangeError);
+    expect(part.placement).toEqual([1, 2, 3]);
+    expect(new Box3().setFromObject(part.object).min.toArray()).toEqual([1, 2, 3]);
+  });
+
   it('setUnitScale refuses 0, negative and non-finite scales and keeps the last one', () => {
     const part = buildPartMesh(positionsOf('inch-cube.stl'));
     part.setUnitScale(25.4);

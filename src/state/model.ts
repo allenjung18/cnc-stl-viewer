@@ -61,3 +61,31 @@ export interface MeshInspection {
   readonly openEdgeSegments: Float32Array;
   readonly nonManifoldEdgeSegments: Float32Array;
 }
+
+/** Material left around the part on each side, mm: X and Y each side, above and below. */
+export interface Allowance {
+  readonly xy: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/**
+ * The block the part is cut from. `auto` sizes it from the part plus the
+ * allowance on every side; `fixed` is the block the user actually has, and the
+ * part must fit in it with the allowance as margins.
+ */
+export interface Stock {
+  readonly mode: 'auto' | 'fixed';
+  readonly allowance: Allowance;
+  /** The fixed block's size, mm (used in `fixed` mode only). */
+  readonly size: Vec3;
+}
+
+/** Where the work zero (the WCS origin CAM uses) sits on the stock; Z0 is always the stock top. */
+export type WcsOrigin = 'bottom-left-front-top' | 'center-top';
+
+export interface Setup {
+  readonly origin: WcsOrigin;
+  /** Where the stock's front-left-bottom corner sits on the bed, mm (bed frame; Z is 0: the stock sits on the bed). */
+  readonly stockOnBed: Vec3;
+}

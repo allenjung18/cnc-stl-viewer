@@ -38,7 +38,7 @@ for (const [name, format] of [
   ['cube-20mm-binary.stl', 'binary STL'],
   ['cube-20mm-ascii.stl', 'ASCII STL'],
 ] as const) {
-  test(`dropping ${name} shows 12 triangles and puts the cube on the bed, min corner at the origin`, async ({ page }) => {
+  test(`dropping ${name} shows 12 triangles and puts the cube in its stock on the bed, not centred`, async ({ page }) => {
     const errors: string[] = [];
     const workers: string[] = [];
     await ready(page, errors, workers);
@@ -55,8 +55,10 @@ for (const [name, format] of [
     const part = await partProbe(page);
     expect(part).not.toBeNull();
     expect(part!.inScene).toBe(true);
-    expect(part!.min).toEqual([0, 0, 0]); // placed, not centred: the file has it at (10, -5, 3)
-    expect(part!.max).toEqual([20, 20, 20]);
+    // Placed, not centred (the file has it at (10, -5, 3)): its min corner sits in the default
+    // stock (allowance 3 a side, 2 underneath) whose front-left corner is the bed origin.
+    expect(part!.min).toEqual([3, 3, 2]);
+    expect(part!.max).toEqual([23, 23, 22]);
     // Parsed off the main thread, in the parse worker.
     expect(workers.some((u) => u.includes('parse.worker'))).toBe(true);
 
@@ -72,7 +74,7 @@ test('a truncated file shows an error and leaves the previous part on the bed', 
   await dropFixture(page, 'inch-cube.stl');
   await expect(triangles(page)).toHaveText('12');
   const before = await partProbe(page);
-  expect(before!.max).toEqual([1, 1, 1]);
+  expect(before!.max).toEqual([4, 4, 3]); // 1 mm cube at (3, 3, 2) in its stock
 
   await dropFixture(page, 'cube-20mm-binary.stl', 400);
   await expect(status(page)).toHaveText(/^cube-20mm-binary\.stl: The binary STL is truncated/);
@@ -90,6 +92,6 @@ test('the Open button file picker loads a file too', async ({ page }) => {
   await (await chooser).setFiles('test/fixtures/cube-20mm-ascii.stl');
   await expect(triangles(page)).toHaveText('12');
   await expect(page.locator('#part-format')).toHaveText('ASCII STL');
-  expect((await partProbe(page))!.min).toEqual([0, 0, 0]);
+  expect((await partProbe(page))!.min).toEqual([3, 3, 2]);
   expect(errors).toEqual([]);
 });

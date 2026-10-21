@@ -103,7 +103,7 @@ test('open-box.stl: 4 open edges, drawn in red along the rim of the missing top'
   await expect(page.locator('#part-info .swatch')).toHaveCount(1);
   const o = await overlay(page);
   expect(o).toMatchObject({ open: 8, nonManifold: null, openColor: RED });
-  expect(o.openWorld).toEqual({ min: [0, 0, 20], max: [20, 20, 20] }); // placed with the part
+  expect(o.openWorld).toEqual({ min: [3, 3, 22], max: [23, 23, 22] }); // placed with the part, at (3, 3, 2) in its stock
   await page.locator('#viewport canvas').screenshot({ path: test.info().outputPath('open-box.png') });
   expect(errors).toEqual([]);
 });

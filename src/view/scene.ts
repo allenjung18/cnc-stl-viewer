@@ -16,6 +16,7 @@ import {
   PlaneGeometry,
   Scene,
 } from 'three';
+import { machineBoxes } from '../geom/fit';
 import type { BBox, MachineProfile, Vec3 } from '../state/model';
 
 /** Grid pitch on the bed, mm. */
@@ -51,14 +52,7 @@ export interface EnvelopeBounds {
 }
 
 export function envelopeBounds(profile: MachineProfile): EnvelopeBounds {
-  const [cx, cy, cz] = profile.cuttingArea;
-  const [tx, ty, tz] = profile.travel;
-  const ox = (cx - tx) / 2;
-  const oy = (cy - ty) / 2;
-  return {
-    cutting: { min: [0, 0, 0], max: [cx, cy, cz] },
-    travel: { min: [ox, oy, 0], max: [ox + tx, oy + ty, tz] },
-  };
+  return machineBoxes(profile);
 }
 
 export interface MachineScene {

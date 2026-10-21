@@ -24,10 +24,14 @@ export interface PartMesh {
   readonly unitScale: number;
   /**
    * Draws the part at `scale` mm per file unit (25.4 for an inch file), still
-   * with its min corner at the origin. The positions are not touched: the
-   * mesh's own scale does it, and the edge overlays scale with it.
+   * with its min corner at the placement point. The positions are not touched:
+   * the mesh's own scale does it, and the edge overlays scale with it.
    */
   setUnitScale(scale: number): void;
+  /** Where the part's bbox min corner sits on the bed, mm (the origin until set). */
+  readonly placement: Vec3;
+  /** Moves the part so its bbox min corner sits at `at` (bed frame, mm), at the current unit scale. */
+  setPlacement(at: Vec3): void;
   dispose(): void;
 }
 
@@ -59,8 +63,9 @@ function edgeOverlay(segments: Float32Array, color: number, name: string): LineS
 
 /**
  * A mesh over the parsed triangle soup, drawn at the unit scale (1 until
- * `setUnitScale`) and placed so the part's bounding-box min
- * corner sits at the origin (the bed's front-left corner, Z = 0 on the bed).
+ * `setUnitScale`) and placed so the part's bounding-box min corner sits at the
+ * placement point: the origin (the bed's front-left corner, Z = 0 on the bed)
+ * until `setPlacement` puts it inside the stock.
  *
  * The part is never centred: centring would put half of it below the bed. The
  * positions array is used as is (no copy) and stays in file space; placement
@@ -93,9 +98,14 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
   const mesh = new Mesh(geometry, material);
   mesh.name = 'part';
   let unitScale = 1;
+  let placement: Vec3 = [0, 0, 0];
   const place = (): void => {
     mesh.scale.setScalar(unitScale);
-    mesh.position.set(-box.min.x * unitScale, -box.min.y * unitScale, -box.min.z * unitScale);
+    mesh.position.set(
+      placement[0] - box.min.x * unitScale,
+      placement[1] - box.min.y * unitScale,
+      placement[2] - box.min.z * unitScale,
+    );
   };
   place();
 
@@ -132,6 +142,15 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
         throw new RangeError(`unit scale must be a finite number above 0, got ${scale}`);
       }
       unitScale = scale;
+      place();
+      mesh.updateMatrixWorld(true);
+    },
+    get placement() {
+      return placement;
+    },
+    setPlacement(at: Vec3) {
+      if (!at.every(Number.isFinite)) throw new RangeError(`placement must be finite numbers, got ${at.join(', ')}`);
+      placement = [at[0], at[1], at[2]];
       place();
       mesh.updateMatrixWorld(true);
     },
