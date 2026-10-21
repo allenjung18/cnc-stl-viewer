@@ -1,8 +1,10 @@
 import { loadStl } from './io/load';
 import { StlError } from './io/sniff';
+import type { MeshStats } from './state/model';
 import { DEFAULT_PROFILE } from './state/profiles';
 import { installDropzone } from './ui/dropzone';
-import { buildPartMesh, type PartMesh } from './view/partMesh';
+import { InspectorPanel, partRows } from './ui/panel';
+import { buildPartMesh, NON_MANIFOLD_EDGE_COLOR, OPEN_EDGE_COLOR, type PartMesh } from './view/partMesh';
 import { buildScene } from './view/scene';
 import { Viewport } from './view/viewport';
 
@@ -16,21 +18,15 @@ const container = byId('viewport');
 const machine = buildScene(DEFAULT_PROFILE);
 const viewport = new Viewport(container, machine.scene, machine.bounds.travel);
 
-const panel = {
-  name: byId<HTMLOutputElement>('part-name'),
-  format: byId<HTMLOutputElement>('part-format'),
-  triangles: byId<HTMLOutputElement>('part-triangles'),
-  status: byId<HTMLParagraphElement>('load-status'),
-};
+const panel = new InspectorPanel(byId<HTMLDListElement>('part-info'), byId('load-status'));
+const css = (hex: number): string => `#${hex.toString(16).padStart(6, '0')}`;
+const EDGE_COLOURS = { open: css(OPEN_EDGE_COLOR), nonManifold: css(NON_MANIFOLD_EDGE_COLOR) };
 
 let part: PartMesh | null = null;
+let stats: MeshStats | null = null;
 let pending: AbortController | null = null;
 
-function setStatus(text: string, isError = false): void {
-  panel.status.textContent = text;
-  panel.status.classList.toggle('error', isError);
-  panel.status.setAttribute('role', isError ? 'alert' : 'status');
-}
+const setStatus = (text: string, isError = false): void => panel.setStatus(text, isError);
 
 async function open(file: File): Promise<void> {
   pending?.abort();
@@ -42,14 +38,13 @@ async function open(file: File): Promise<void> {
       signal: controller.signal,
       onProgress: (done) => setStatus(`Reading ${file.name}… ${done.toLocaleString()} triangles`),
     });
-    const next = buildPartMesh(stl.positions);
+    const next = buildPartMesh(stl.positions, stl.inspection);
     part?.dispose();
     part = next;
     machine.scene.add(next.object);
     viewport.requestRender();
-    panel.name.value = stl.name;
-    panel.format.value = stl.format === 'stl-bin' ? 'binary STL' : 'ASCII STL';
-    panel.triangles.value = stl.triangles.toLocaleString('en-US');
+    panel.show(partRows({ name: stl.name, format: stl.format, stats: stl.inspection.stats }, EDGE_COLOURS));
+    stats = stl.inspection.stats;
     setStatus(`Loaded ${stl.name}.`);
   } catch (e) {
     if (controller.signal.aborted) return; // a newer file replaced this one
@@ -76,6 +71,9 @@ if (import.meta.env.DEV) {
     viewport,
     get part() {
       return part;
+    },
+    get stats() {
+      return stats;
     },
   };
 }

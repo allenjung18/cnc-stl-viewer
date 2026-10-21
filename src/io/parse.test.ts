@@ -112,7 +112,7 @@ describe('parseStl', () => {
 });
 
 describe('handleParseRequest (the worker body)', () => {
-  it('posts done with the positions transferred', () => {
+  it('posts done with the positions and the inspection, every array transferred', () => {
     const bytes = fixture('cube-20mm-ascii.stl');
     const posted: [ParseResponse, Transferable[]][] = [];
     handleParseRequest({ id: 7, buffer: bytes.slice().buffer }, (m, t) => posted.push([m, t]));
@@ -121,7 +121,14 @@ describe('handleParseRequest (the worker body)', () => {
     if (msg.type !== 'done') throw new Error(`expected done, got ${msg.type}`);
     expect(msg.id).toBe(7);
     expect(msg.triangles).toBe(12);
-    expect(transfer).toEqual([msg.positions.buffer]);
+    expect(msg.inspection.stats.vertices).toBe(8);
+    expect(msg.inspection.stats.watertight).toBe(true);
+    expect(transfer).toEqual([
+      msg.positions.buffer,
+      msg.inspection.openEdgeSegments.buffer,
+      msg.inspection.nonManifoldEdgeSegments.buffer,
+    ]);
+    expect(new Set(transfer).size).toBe(3); // a buffer listed twice would make postMessage throw
   });
 
   it('posts a readable error for a truncated file', () => {

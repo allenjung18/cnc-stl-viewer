@@ -23,3 +23,41 @@ export interface MachineProfile {
   readonly keepOut?: readonly BBox[];
   readonly bedOriginNote: string;
 }
+
+/**
+ * What the inspector reports about a mesh. Lengths are in file units, which
+ * are millimetres until a unit scale is applied; the axes are the file's.
+ */
+export interface MeshStats {
+  readonly triangles: number;
+  /** Distinct vertices after welding points closer than `weldEpsilon`. */
+  readonly vertices: number;
+  readonly bbox: BBox;
+  readonly size: Vec3;
+  /**
+   * Signed volume (divergence theorem). Exact for a closed, consistently wound
+   * mesh; negative when the normals face inward; only an estimate when the mesh
+   * is open.
+   */
+  readonly volumeMm3: number;
+  readonly areaMm2: number;
+  /** No open and no non-manifold edges. */
+  readonly watertight: boolean;
+  /** Edges used by exactly one triangle. */
+  readonly openEdges: number;
+  /** Edges used by more than two triangles. */
+  readonly nonManifoldEdges: number;
+  /** Triangles that collapse when welded, or whose area is below weldEpsilon². */
+  readonly degenerateTris: number;
+  /** The volume is negative: the triangles are wound inward. */
+  readonly flippedHint: boolean;
+  /** The welding tolerance used, file units. */
+  readonly weldEpsilon: number;
+}
+
+/** The stats plus the problem edges to draw, as segment endpoints in file space (6 numbers per edge). */
+export interface MeshInspection {
+  readonly stats: MeshStats;
+  readonly openEdgeSegments: Float32Array;
+  readonly nonManifoldEdgeSegments: Float32Array;
+}

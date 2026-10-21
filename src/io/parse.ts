@@ -6,6 +6,8 @@
  *
  * Pure TypeScript on bytes, shared by the parse worker and the Node tests.
  */
+import { inspectMesh } from '../geom/stats';
+import type { MeshInspection } from '../state/model';
 import { StlError, sniffStl, type StlFormat } from './sniff';
 
 export interface ParsedStl {
@@ -129,10 +131,17 @@ export interface ParseRequest {
   readonly buffer: ArrayBuffer;
 }
 
-/** Worker -> main thread. `positions` on `done` is transferred, not copied. */
+/** Worker -> main thread. `positions` and the edge segments on `done` are transferred, not copied. */
 export type ParseResponse =
   | { readonly id: number; readonly type: 'progress'; readonly done: number; readonly total: number }
-  | { readonly id: number; readonly type: 'done'; readonly format: StlFormat; readonly triangles: number; readonly positions: Float32Array }
+  | {
+      readonly id: number;
+      readonly type: 'done';
+      readonly format: StlFormat;
+      readonly triangles: number;
+      readonly positions: Float32Array;
+      readonly inspection: MeshInspection;
+    }
   | { readonly id: number; readonly type: 'error'; readonly message: string };
 
 /** What the worker does with one request; separate from the worker shell so Node tests can run it. */
@@ -142,9 +151,11 @@ export function handleParseRequest(
 ): void {
   try {
     const parsed = parseStl(req.buffer, (done, total) => post({ id: req.id, type: 'progress', done, total }, []));
+    // The inspector runs here too, off the main thread: welding and the edge census are the slow part.
+    const inspection = inspectMesh(parsed.positions);
     post(
-      { id: req.id, type: 'done', format: parsed.format, triangles: parsed.triangles, positions: parsed.positions },
-      [parsed.positions.buffer],
+      { id: req.id, type: 'done', format: parsed.format, triangles: parsed.triangles, positions: parsed.positions, inspection },
+      [parsed.positions.buffer, inspection.openEdgeSegments.buffer, inspection.nonManifoldEdgeSegments.buffer],
     );
   } catch (e) {
     const message = e instanceof StlError ? e.message : `The file could not be read: ${e instanceof Error ? e.message : String(e)}`;

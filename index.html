@@ -10,12 +10,19 @@
       #viewport canvas { display: block; width: 100%; height: 100%; touch-action: none; }
       #panel {
         position: fixed; top: 12px; left: 12px; max-width: min(320px, calc(100vw - 24px));
+        max-height: calc(100vh - 24px); overflow-y: auto; box-sizing: border-box;
         padding: 10px 12px; border-radius: 6px; background: rgba(20, 23, 27, 0.88); color: #d8dee6;
         font: 13px/1.4 system-ui, sans-serif;
       }
       #panel dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 8px 0 0; }
       #panel dt { color: #8b96a3; }
       #panel dd { margin: 0; overflow-wrap: anywhere; }
+      #panel output[data-tone='ok'] { color: #8fd18f; }
+      #panel output[data-tone='warn'] { color: #ffd479; }
+      #panel output[data-tone='bad'] { color: #ff8a80; }
+      #panel .swatch {
+        display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 1px;
+      }
       #panel button { font: inherit; padding: 4px 10px; cursor: pointer; }
       #load-status { margin: 8px 0 0; }
       #load-status:empty { display: none; }
@@ -34,9 +41,9 @@
       <button id="open-file" type="button">Open STL…</button>
       <input id="file-input" type="file" accept=".stl,model/stl,application/sla" hidden />
       <span> or drop a file anywhere</span>
-      <dl>
-        <dt>Part</dt><dd><output id="part-name">none</output></dd>
-        <dt>Format</dt><dd><output id="part-format">–</output></dd>
+      <dl id="part-info">
+        <dt>Part</dt><dd><output id="part-name" data-testid="part-name">none</output></dd>
+        <dt>Format</dt><dd><output id="part-format" data-testid="part-format">–</output></dd>
         <dt>Triangles</dt><dd><output id="part-triangles" data-testid="part-triangles">–</output></dd>
       </dl>
       <p id="load-status" role="status" aria-live="polite"></p>

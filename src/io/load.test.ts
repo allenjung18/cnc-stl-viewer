@@ -40,6 +40,7 @@ describe('loadStl', () => {
     const stl = await loadStl(fileOf('cube.stl', fixture('cube-20mm-binary.stl')), { createWorker: () => worker });
     expect(stl).toMatchObject({ name: 'cube.stl', bytes: 684, format: 'stl-bin', triangles: 12 });
     expect(stl.positions).toHaveLength(108);
+    expect(stl.inspection.stats).toMatchObject({ triangles: 12, vertices: 8, watertight: true, size: [20, 20, 20] });
     expect(worker.transferred).toHaveLength(1);
     expect(worker.terminated).toBe(true);
   });

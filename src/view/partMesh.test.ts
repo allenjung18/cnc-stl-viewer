@@ -1,10 +1,11 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
-import { Box3, Group } from 'three';
+import { Box3, Group, type LineBasicMaterial } from 'three';
 import { describe, expect, it } from 'vitest';
 import { CUBE_MIN } from '../../test/fixtures/tiny-generator';
+import { inspectMesh } from '../geom/stats';
 import { parseStl } from '../io/parse';
-import { buildPartMesh } from './partMesh';
+import { buildPartMesh, NON_MANIFOLD_EDGE_COLOR, OPEN_EDGE_COLOR } from './partMesh';
 
 const positionsOf = (name: string): Float32Array =>
   parseStl(new Uint8Array(readFileSync(new URL(`../../test/fixtures/${name}`, import.meta.url)))).positions;
@@ -60,5 +61,40 @@ describe('buildPartMesh', () => {
     group.add(part.object);
     part.dispose();
     expect(part.object.parent).toBeNull();
+  });
+
+  it('draws open edges red and non-manifold edges magenta, placed with the part', () => {
+    const open = positionsOf('open-box.stl');
+    const part = buildPartMesh(open, inspectMesh(open));
+    expect(part.nonManifoldEdges).toBeNull();
+    const lines = part.openEdges!;
+    expect(lines.parent).toBe(part.object);
+    expect(lines.geometry.getAttribute('position').count).toBe(8); // 4 edges, 2 ends each
+    expect((lines.material as LineBasicMaterial).color.getHex()).toBe(OPEN_EDGE_COLOR);
+    // The rim of the missing top sits at the top of the placed part: z = 20 in the world.
+    const world = new Box3().setFromObject(lines);
+    expect(world.min.z).toBe(20);
+    expect(world.max.toArray()).toEqual([20, 20, 20]);
+
+    const bow = positionsOf('bowtie.stl');
+    const tie = buildPartMesh(bow, inspectMesh(bow));
+    expect(tie.openEdges).toBeNull();
+    expect(tie.nonManifoldEdges!.geometry.getAttribute('position').count).toBe(2);
+    expect((tie.nonManifoldEdges!.material as LineBasicMaterial).color.getHex()).toBe(NON_MANIFOLD_EDGE_COLOR);
+  });
+
+  it('draws no overlay for a watertight cube or when no inspection is given', () => {
+    const cube = positionsOf('cube-20mm-binary.stl');
+    for (const part of [buildPartMesh(cube, inspectMesh(cube)), buildPartMesh(cube)]) {
+      expect(part.openEdges).toBeNull();
+      expect(part.nonManifoldEdges).toBeNull();
+      expect(part.object.children).toHaveLength(0);
+    }
+  });
+
+  it('refuses a segment array that is not whole segments', () => {
+    const cube = positionsOf('cube-20mm-binary.stl');
+    const bad = { openEdgeSegments: new Float32Array(5), nonManifoldEdgeSegments: new Float32Array(0) };
+    expect(() => buildPartMesh(cube, bad)).toThrow(/whole segments/);
   });
 });

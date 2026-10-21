@@ -3,6 +3,7 @@
  * are checked before the file is read; every failure is a StlError whose
  * message can be shown as is.
  */
+import type { MeshInspection } from '../state/model';
 import type { ParseRequest, ParseResponse } from './parse';
 import { MAX_STL_BYTES, StlError, formatBytes, type StlFormat } from './sniff';
 
@@ -13,6 +14,8 @@ export interface LoadedStl {
   readonly triangles: number;
   /** x, y, z per vertex, three vertices per triangle, file units and file axes. */
   readonly positions: Float32Array;
+  /** Size, volume, area, counts and the problem edges, computed in the worker. */
+  readonly inspection: MeshInspection;
 }
 
 /** The part of a Worker that `loadStl` uses, so tests can stand in for one. */
@@ -76,7 +79,14 @@ export async function loadStl(file: FileLike, options: LoadOptions = {}): Promis
         onProgress?.(msg.done, msg.total);
       } else if (msg.type === 'done') {
         finish();
-        resolve({ name: file.name, bytes: file.size, format: msg.format, triangles: msg.triangles, positions: msg.positions });
+        resolve({
+          name: file.name,
+          bytes: file.size,
+          format: msg.format,
+          triangles: msg.triangles,
+          positions: msg.positions,
+          inspection: msg.inspection,
+        });
       } else {
         finish();
         reject(new StlError(`${file.name}: ${msg.message}`));
