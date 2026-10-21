@@ -1,9 +1,11 @@
+import { scaleStats, unitHint, unitScaleOf, type UnitChoice } from './geom/units';
 import { loadStl } from './io/load';
-import { StlError } from './io/sniff';
+import { StlError, type StlFormat } from './io/sniff';
 import type { MeshStats } from './state/model';
+import { browserStorage, loadUnits, saveUnits } from './state/prefs';
 import { DEFAULT_PROFILE } from './state/profiles';
 import { installDropzone } from './ui/dropzone';
-import { InspectorPanel, partRows, uninspectedRows } from './ui/panel';
+import { InspectorPanel, partRows, uninspectedRows, UnitsBadge, unitsBadge, type PanelRow } from './ui/panel';
 import { buildPartMesh, NON_MANIFOLD_EDGE_COLOR, OPEN_EDGE_COLOR, type PartMesh } from './view/partMesh';
 import { buildScene } from './view/scene';
 import { Viewport } from './view/viewport';
@@ -23,10 +25,43 @@ const css = (hex: number): string => `#${hex.toString(16).padStart(6, '0')}`;
 const EDGE_COLOURS = { open: css(OPEN_EDGE_COLOR), nonManifold: css(NON_MANIFOLD_EDGE_COLOR) };
 
 let part: PartMesh | null = null;
-let stats: MeshStats | null = null;
+/** The loaded part's stats as inspected, file units. */
+let fileStats: MeshStats | null = null;
+/** What the panel rows are built from; the stats are scaled in `render`. */
+let shown: { name: string; format: StlFormat; triangles: number; inspectionError: string | null } | null = null;
 let pending: AbortController | null = null;
 
+// STL is unitless: mm unless the user said inches; the choice is kept for the next visit.
+const storage = browserStorage();
+let units: UnitChoice = loadUnits(storage);
+
 const setStatus = (text: string, isError = false): void => panel.setStatus(text, isError);
+
+const unitsBadgeEl = new UnitsBadge(
+  byId('units-value'),
+  byId<HTMLButtonElement>('units-toggle'),
+  byId('units-hint'),
+  () => {
+    units = units === 'in' ? 'mm' : 'in';
+    saveUnits(storage, units);
+    render();
+  },
+);
+
+/** Applies the units choice to the mesh, the panel rows and the badge. */
+function render(): void {
+  const scale = unitScaleOf(units);
+  part?.setUnitScale(scale);
+  unitsBadgeEl.show(unitsBadge(units, part ? unitHint(part.size, units, DEFAULT_PROFILE.cuttingArea) : null));
+  if (shown) {
+    const rows: PanelRow[] = fileStats
+      ? partRows({ name: shown.name, format: shown.format, stats: scaleStats(fileStats, scale) }, EDGE_COLOURS)
+      : uninspectedRows(shown.name, shown.format, shown.triangles, shown.inspectionError ?? 'unknown error');
+    panel.show(rows);
+  }
+  viewport.requestRender();
+}
+render();
 
 async function open(file: File): Promise<void> {
   pending?.abort();
@@ -42,13 +77,9 @@ async function open(file: File): Promise<void> {
     part?.dispose();
     part = next;
     machine.scene.add(next.object);
-    viewport.requestRender();
-    panel.show(
-      stl.inspection
-        ? partRows({ name: stl.name, format: stl.format, stats: stl.inspection.stats }, EDGE_COLOURS)
-        : uninspectedRows(stl.name, stl.format, stl.triangles, stl.inspectionError ?? 'unknown error'),
-    );
-    stats = stl.inspection?.stats ?? null;
+    fileStats = stl.inspection?.stats ?? null;
+    shown = { name: stl.name, format: stl.format, triangles: stl.triangles, inspectionError: stl.inspectionError ?? null };
+    render();
     setStatus(`Loaded ${stl.name}.`);
   } catch (e) {
     if (controller.signal.aborted) return; // a newer file replaced this one
@@ -76,8 +107,15 @@ if (import.meta.env.DEV) {
     get part() {
       return part;
     },
+    /** The stats as shown, mm (after the units scale). */
     get stats() {
-      return stats;
+      return fileStats ? scaleStats(fileStats, unitScaleOf(units)) : null;
+    },
+    get fileStats() {
+      return fileStats;
+    },
+    get units() {
+      return units;
     },
   };
 }

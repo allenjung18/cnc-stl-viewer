@@ -24,6 +24,11 @@
         display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 1px;
       }
       #panel button { font: inherit; padding: 4px 10px; cursor: pointer; }
+      #units { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 8px 0 0; }
+      #units .label { color: #8b96a3; }
+      #units-hint { flex-basis: 100%; margin: 0; }
+      #units-hint[hidden] { display: none; }
+      #units-hint[data-tone='warn'] { color: #ffd479; }
       #load-status { margin: 8px 0 0; }
       #load-status:empty { display: none; }
       #load-status.error { color: #ff8a80; }
@@ -41,6 +46,12 @@
       <button id="open-file" type="button">Open STL…</button>
       <input id="file-input" type="file" accept=".stl,model/stl,application/sla" hidden />
       <span> or drop a file anywhere</span>
+      <div id="units" role="group" aria-label="Units">
+        <span class="label">Units</span>
+        <output id="units-value" data-testid="units-value">mm (STL has no units)</output>
+        <button id="units-toggle" type="button" data-testid="units-toggle">Treat as inches (×25.4)</button>
+        <p id="units-hint" data-testid="units-hint" hidden></p>
+      </div>
       <dl id="part-info">
         <dt>Part</dt><dd><output id="part-name" data-testid="part-name">none</output></dd>
         <dt>Format</dt><dd><output id="part-format" data-testid="part-format">–</output></dd>

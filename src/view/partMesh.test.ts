@@ -38,6 +38,37 @@ describe('buildPartMesh', () => {
     expect(far.max.toArray()).toEqual([20, 20, 20]);
   });
 
+  it('setUnitScale(25.4) draws the inch cube 25.4 mm on a side, still from the origin', () => {
+    const positions = positionsOf('inch-cube.stl').map((v) => v + 2); // file box (2..3)
+    const open = Float32Array.from([2, 2, 3, 3, 2, 3]); // one edge on the top, file space
+    const part = buildPartMesh(positions, { openEdgeSegments: open, nonManifoldEdgeSegments: new Float32Array(0) });
+    expect(part.unitScale).toBe(1);
+    part.setUnitScale(25.4);
+    expect(part.unitScale).toBe(25.4);
+    const world = new Box3().setFromObject(part.object);
+    for (const v of world.min.toArray()) expect(v).toBeCloseTo(0, 9);
+    for (const v of world.max.toArray()) expect(v).toBeCloseTo(25.4, 9);
+    // The overlay scales with the part.
+    const edge = new Box3().setFromObject(part.openEdges!);
+    expect(edge.max.x).toBeCloseTo(25.4, 9);
+    expect(edge.min.z).toBeCloseTo(25.4, 9);
+    // The positions and the file-space box are untouched.
+    expect(part.object.geometry.getAttribute('position').array).toBe(positions);
+    expect(part.fileBBox).toEqual({ min: [2, 2, 2], max: [3, 3, 3] });
+    expect(part.size).toEqual([1, 1, 1]);
+    // And back.
+    part.setUnitScale(1);
+    expect(new Box3().setFromObject(part.object).max.toArray()).toEqual([1, 1, 1]);
+  });
+
+  it('setUnitScale refuses 0, negative and non-finite scales and keeps the last one', () => {
+    const part = buildPartMesh(positionsOf('inch-cube.stl'));
+    part.setUnitScale(25.4);
+    for (const bad of [0, -1, Number.NaN, Infinity]) expect(() => part.setUnitScale(bad)).toThrow(RangeError);
+    expect(part.unitScale).toBe(25.4);
+    expect(part.object.scale.toArray()).toEqual([25.4, 25.4, 25.4]);
+  });
+
   it('gives each triangle a flat normal from its winding', () => {
     const part = buildPartMesh(positionsOf('cube-20mm-binary.stl'));
     const normals = part.object.geometry.getAttribute('normal');

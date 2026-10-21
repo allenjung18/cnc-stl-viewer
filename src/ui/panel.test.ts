@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { inspectMesh } from '../geom/stats';
 import { parseStl } from '../io/parse';
-import { formatNumber, partRows, uninspectedRows, type PanelRow } from './panel';
+import { scaleStats, unitHint } from '../geom/units';
+import { NOMAD_883_PRO_CUTTING_AREA } from '../state/profiles';
+import { formatNumber, partRows, uninspectedRows, unitsBadge, type PanelRow } from './panel';
 
 const COLOURS = { open: '#ff3b30', nonManifold: '#ff3df5' };
 
@@ -107,5 +109,43 @@ describe('formatNumber', () => {
     expect(formatNumber(Infinity)).toBe('∞');
     expect(formatNumber(-Infinity)).toBe('−∞');
     expect(formatNumber(Number.NaN)).toBe('not a number');
+  });
+});
+
+describe('unitsBadge', () => {
+  it('mm by default: offers the inch toggle; the inch cube shows its hint', () => {
+    const size = inspectMesh(
+      parseStl(new Uint8Array(readFileSync(new URL('../../test/fixtures/inch-cube.stl', import.meta.url)))).positions,
+    ).stats.size;
+    expect(unitsBadge('mm', unitHint(size, 'mm', NOMAD_883_PRO_CUTTING_AREA))).toEqual({
+      value: 'mm (STL has no units)',
+      toggleLabel: 'Treat as inches (×25.4)',
+      hint: 'looks like inches',
+      hintTone: 'warn',
+    });
+  });
+
+  it('no part or no hint: no hint text', () => {
+    expect(unitsBadge('mm', null)).toMatchObject({ hint: null, hintTone: undefined });
+  });
+
+  it('inches: says so and offers mm back', () => {
+    expect(unitsBadge('in', null)).toEqual({
+      value: 'inches (×25.4)',
+      toggleLabel: 'Treat as mm',
+      hint: null,
+      hintTone: undefined,
+    });
+  });
+
+  it('the inch cube after ×25.4: rows read 25.4 mm and 16,387.064 mm³', () => {
+    const parsed = parseStl(new Uint8Array(readFileSync(new URL('../../test/fixtures/inch-cube.stl', import.meta.url))));
+    const stats = scaleStats(inspectMesh(parsed.positions).stats, 25.4);
+    const rows = Object.fromEntries(
+      partRows({ name: 'inch-cube.stl', format: parsed.format, stats }, COLOURS).map((r) => [r.key, r.value]),
+    );
+    expect(rows.size).toBe('25.4 × 25.4 × 25.4 mm');
+    expect(rows.volume).toBe('16,387.064 mm³');
+    expect(rows.area).toBe('3,870.96 mm²');
   });
 });

@@ -20,6 +20,14 @@ export interface PartMesh {
   readonly openEdges: LineSegments | null;
   /** Non-manifold edges drawn over the part, or null when there are none. */
   readonly nonManifoldEdges: LineSegments | null;
+  /** File units -> mm, as drawn (1 until set). */
+  readonly unitScale: number;
+  /**
+   * Draws the part at `scale` mm per file unit (25.4 for an inch file), still
+   * with its min corner at the origin. The positions are not touched: the
+   * mesh's own scale does it, and the edge overlays scale with it.
+   */
+  setUnitScale(scale: number): void;
   dispose(): void;
 }
 
@@ -50,7 +58,8 @@ function edgeOverlay(segments: Float32Array, color: number, name: string): LineS
 }
 
 /**
- * A mesh over the parsed triangle soup, placed so the part's bounding-box min
+ * A mesh over the parsed triangle soup, drawn at the unit scale (1 until
+ * `setUnitScale`) and placed so the part's bounding-box min
  * corner sits at the origin (the bed's front-left corner, Z = 0 on the bed).
  *
  * The part is never centred: centring would put half of it below the bed. The
@@ -83,7 +92,12 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
   });
   const mesh = new Mesh(geometry, material);
   mesh.name = 'part';
-  mesh.position.set(-box.min.x, -box.min.y, -box.min.z);
+  let unitScale = 1;
+  const place = (): void => {
+    mesh.scale.setScalar(unitScale);
+    mesh.position.set(-box.min.x * unitScale, -box.min.y * unitScale, -box.min.z * unitScale);
+  };
+  place();
 
   let openEdges: LineSegments | null = null;
   let nonManifoldEdges: LineSegments | null = null;
@@ -110,6 +124,17 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
     size: [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z],
     openEdges,
     nonManifoldEdges,
+    get unitScale() {
+      return unitScale;
+    },
+    setUnitScale(scale: number) {
+      if (!(Number.isFinite(scale) && scale > 0)) {
+        throw new RangeError(`unit scale must be a finite number above 0, got ${scale}`);
+      }
+      unitScale = scale;
+      place();
+      mesh.updateMatrixWorld(true);
+    },
     dispose() {
       mesh.removeFromParent();
       geometry.dispose();

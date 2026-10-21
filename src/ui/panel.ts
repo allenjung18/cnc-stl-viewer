@@ -2,8 +2,11 @@
  * The part panel: what was loaded and what the inspector found. `partRows` is
  * pure (unit-tested in Node); `InspectorPanel` writes the rows into the page.
  *
- * STL carries no units; lengths are shown as millimetres, the machine's units.
+ * STL carries no units; lengths are shown as millimetres, the machine's units,
+ * after the units badge's scale (×1, or ×25.4 for an inch file). `unitsBadge`
+ * is pure too; `UnitsBadge` writes it into the page and reports the toggle.
  */
+import { MM_PER_INCH, type UnitChoice, type UnitHint } from '../geom/units';
 import type { StlFormat } from '../io/sniff';
 import type { MeshStats } from '../state/model';
 
@@ -106,6 +109,48 @@ export function uninspectedRows(name: string, format: StlFormat, triangles: numb
     { key: 'triangles', label: 'Triangles', value: count(triangles) },
     { key: 'inspection', label: 'Inspection', value: `not run: ${reason}`, tone: 'warn' },
   ];
+}
+
+/** What the units badge shows. */
+export interface UnitsBadgeView {
+  /** The current reading of the file's numbers. */
+  readonly value: string;
+  /** The toggle's label: what pressing it switches to. */
+  readonly toggleLabel: string;
+  /** A heuristic hint, or null; never acted on without the user. */
+  readonly hint: string | null;
+  readonly hintTone: RowTone | undefined;
+}
+
+/** The badge for a units choice and the hint for the loaded part (`null` when none or no part). */
+export function unitsBadge(choice: UnitChoice, hint: UnitHint | null): UnitsBadgeView {
+  return {
+    value: choice === 'in' ? `inches (×${MM_PER_INCH})` : 'mm (STL has no units)',
+    toggleLabel: choice === 'in' ? 'Treat as mm' : `Treat as inches (×${MM_PER_INCH})`,
+    hint: hint ? hint.text : null,
+    hintTone: hint ? 'warn' : undefined,
+  };
+}
+
+/** The units badge in the page: the value, the hint, and a toggle button. */
+export class UnitsBadge {
+  constructor(
+    private readonly value: HTMLElement,
+    private readonly toggle: HTMLButtonElement,
+    private readonly hint: HTMLElement,
+    onToggle: () => void,
+  ) {
+    toggle.addEventListener('click', () => onToggle());
+  }
+
+  show(view: UnitsBadgeView): void {
+    this.value.textContent = view.value;
+    this.toggle.textContent = view.toggleLabel;
+    this.hint.textContent = view.hint ?? '';
+    this.hint.hidden = view.hint === null;
+    if (view.hintTone) this.hint.dataset.tone = view.hintTone;
+    else delete this.hint.dataset.tone;
+  }
 }
 
 /** Writes rows into a `<dl>` and messages into a status line. */
