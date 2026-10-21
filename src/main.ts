@@ -1,4 +1,15 @@
+import { Raycaster, Vector2 } from 'three';
 import { checkFit, type FitReport } from './geom/fit';
+import {
+  IDENTITY,
+  layFlat,
+  orientCandidates,
+  orientStats,
+  rankOrientations,
+  rotate90,
+  type OrientCandidate,
+  type RankedOrientation,
+} from './geom/orient';
 import { scaleStats, unitHint, unitScaleOf, type UnitChoice } from './geom/units';
 import { loadStl } from './io/load';
 import { StlError, type StlFormat } from './io/sniff';
@@ -7,7 +18,8 @@ import { browserStorage, loadUnits, saveUnits } from './state/prefs';
 import { DEFAULT_PROFILE } from './state/profiles';
 import { installDropzone } from './ui/dropzone';
 import { InspectorPanel, partRows, uninspectedRows, UnitsBadge, unitsBadge, type PanelRow } from './ui/panel';
-import { fitRows, fitVerdict, readStockForm, StockPanel } from './ui/stockPanel';
+import { OrientPanel, orientItems } from './ui/orientPanel';
+import { fitRows, fitVerdict, readStockForm, StockPanel, type StockForm } from './ui/stockPanel';
 import { buildPartMesh, NON_MANIFOLD_EDGE_COLOR, OPEN_EDGE_COLOR, type PartMesh } from './view/partMesh';
 import { buildScene } from './view/scene';
 import { buildKeepOutMesh, buildStockMesh } from './view/stockMesh';
@@ -48,11 +60,21 @@ let profile: MachineProfile = DEFAULT_PROFILE;
 let fit: FitReport | null = null;
 const stockPanel = new StockPanel(byId('stock'), () => render());
 
-/** The part's size as shown, mm: the inspected size when there is one, else the mesh's box; both × the units scale. */
+/** The inspected stats as shown: turned to the part's orientation, then × the units scale. */
+function shownStats(scale: number): MeshStats | null {
+  return part && fileStats ? scaleStats(orientStats(fileStats, part.orientedBBox), scale) : null;
+}
+
+/** The part's size as shown, mm: the box of the part as oriented, × the units scale. */
 function partSizeMm(scale: number): Vec3 | null {
   if (!part) return null;
-  const size = fileStats ? scaleStats(fileStats, scale).size : part.size.map((v) => v * scale);
+  const size = shownStats(scale)?.size ?? part.orientedSize.map((v) => v * scale);
   return [size[0]!, size[1]!, size[2]!];
+}
+
+/** The fit checks for a part of `partSize` (mm) with the current stock inputs. */
+function fitFor(form: StockForm & { ok: true }, partSize: Vec3 | null): FitReport {
+  return checkFit({ partSize, stock: form.stock, setup: form.setup, profile: { ...DEFAULT_PROFILE, keepOut: form.keepOut } });
 }
 
 /** Sizes the stock, runs the fit checks, and draws the stock, the keep-out box, the part placement and the verdict. */
@@ -66,7 +88,7 @@ function renderFit(scale: number): void {
   }
   profile = { ...DEFAULT_PROFILE, keepOut: form.keepOut };
   try {
-    fit = checkFit({ partSize: partSizeMm(scale), stock: form.stock, setup: form.setup, profile });
+    fit = fitFor(form, partSizeMm(scale));
     keepOutMesh.update(form.keepOut); // drawn only once checkFit has found its corners finite
     part?.setPlacement(fit.partOnBed ?? [0, 0, 0]);
   } catch (e) {
@@ -90,21 +112,102 @@ const unitsBadgeEl = new UnitsBadge(
   },
 );
 
-/** Applies the units choice to the mesh, the panel rows and the badge. */
+// Orientation: quarter turns, lay flat on a picked face, and auto-orient's suggestions (never applied unasked).
+/** Auto-orient's candidates for the loaded part, kept so the list re-ranks cheaply when the stock changes. */
+let candidates: OrientCandidate[] | null = null;
+/** The list as shown, best first; null while it is hidden. */
+let ranked: RankedOrientation[] | null = null;
+let listShown = false;
+let picking = false;
+
+function setRotation(next: Parameters<PartMesh['setRotation']>[0]): void {
+  if (!part) return;
+  part.setRotation(next);
+  setPicking(false);
+  render(); // the size, the stock and every fit check follow the new orientation
+}
+
+function setPicking(on: boolean, hint?: string): void {
+  picking = on && part !== null;
+  orientPanel.setPicking(picking, hint);
+}
+
+const orientPanel = new OrientPanel(byId('orient'), {
+  rotate: (axis) => {
+    if (part) setRotation(rotate90(part.rotation, axis));
+  },
+  reset: () => setRotation(IDENTITY),
+  pick: (on) => setPicking(on),
+  auto: () => {
+    if (!part) return;
+    candidates ??= orientCandidates(part.positions);
+    listShown = true;
+    render();
+  },
+  apply: (index) => {
+    const choice = ranked?.[index];
+    if (choice) setRotation(choice.rotation);
+  },
+});
+
+/** Re-ranks the suggestions with the current stock inputs and units, so each one's fit is current. */
+function renderOrient(scale: number): void {
+  orientPanel.setEnabled(part !== null);
+  if (!part || !listShown || !candidates) {
+    ranked = null;
+    orientPanel.showList(null);
+    return;
+  }
+  const form = readStockForm(stockPanel.read());
+  ranked = rankOrientations(candidates, {
+    scale,
+    fitOf: form.ok ? (size) => fitFor(form, size) : undefined,
+  });
+  orientPanel.showList(orientItems(ranked, part.rotation));
+}
+
+/** Applies the units choice and the orientation to the mesh, the panel rows and the badge, then re-runs the fit. */
 function render(): void {
   const scale = unitScaleOf(units);
   part?.setUnitScale(scale);
   unitsBadgeEl.show(unitsBadge(units, part ? unitHint(part.size, units, DEFAULT_PROFILE.cuttingArea) : null));
   if (shown) {
-    const rows: PanelRow[] = fileStats
-      ? partRows({ name: shown.name, format: shown.format, stats: scaleStats(fileStats, scale) }, EDGE_COLOURS)
+    const stats = shownStats(scale);
+    const rows: PanelRow[] = stats
+      ? partRows({ name: shown.name, format: shown.format, stats }, EDGE_COLOURS)
       : uninspectedRows(shown.name, shown.format, shown.triangles, shown.inspectionError ?? 'unknown error');
     panel.show(rows);
   }
   renderFit(scale);
+  renderOrient(scale);
   viewport.requestRender();
 }
 render();
+
+// Lay flat: in pick mode a click (not a drag: that orbits) on the part puts the clicked face down.
+const canvas = viewport.renderer.domElement;
+const raycaster = new Raycaster();
+let down: { x: number; y: number } | null = null;
+canvas.addEventListener('pointerdown', (e) => {
+  down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+});
+canvas.addEventListener('pointerup', (e) => {
+  const start = down;
+  down = null;
+  if (!picking || !part || !start || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return;
+  const rect = canvas.getBoundingClientRect();
+  const ndc = new Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, viewport.camera);
+  const hit = part.pickFace(raycaster);
+  if (!hit) {
+    setPicking(true, 'That missed the part (or hit a degenerate triangle): click a face of the part, or Esc to cancel.');
+    return;
+  }
+  setRotation(layFlat(part.rotation, hit.normal));
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && picking) setPicking(false);
+});
 
 async function open(file: File): Promise<void> {
   pending?.abort();
@@ -119,6 +222,9 @@ async function open(file: File): Promise<void> {
     const next = buildPartMesh(stl.positions, stl.inspection ?? undefined);
     part?.dispose();
     part = next;
+    candidates = null; // a new part starts as read, with no suggestions until asked
+    listShown = false;
+    setPicking(false);
     machine.scene.add(next.object);
     fileStats = stl.inspection?.stats ?? null;
     shown = { name: stl.name, format: stl.format, triangles: stl.triangles, inspectionError: stl.inspectionError ?? null };
@@ -168,6 +274,13 @@ if (import.meta.env.DEV) {
     },
     get profile() {
       return profile;
+    },
+    /** Auto-orient's list as shown, best first; null while hidden. */
+    get ranked() {
+      return ranked;
+    },
+    get picking() {
+      return picking;
     },
   };
 }

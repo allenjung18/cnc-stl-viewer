@@ -1,8 +1,9 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
-import { Box3, Group, type LineBasicMaterial } from 'three';
+import { Box3, Group, Raycaster, Vector3, type LineBasicMaterial } from 'three';
 import { describe, expect, it } from 'vitest';
-import { CUBE_MIN } from '../../test/fixtures/tiny-generator';
+import { boxTriangles, CUBE_MIN, reversed } from '../../test/fixtures/tiny-generator';
+import { IDENTITY, layFlat, rotate90 } from '../geom/orient';
 import { inspectMesh } from '../geom/stats';
 import { parseStl } from '../io/parse';
 import { buildPartMesh, NON_MANIFOLD_EDGE_COLOR, OPEN_EDGE_COLOR } from './partMesh';
@@ -149,5 +150,78 @@ describe('buildPartMesh', () => {
     const cube = positionsOf('cube-20mm-binary.stl');
     const bad = { openEdgeSegments: new Float32Array(5), nonManifoldEdgeSegments: new Float32Array(0) };
     expect(() => buildPartMesh(cube, bad)).toThrow(/whole segments/);
+  });
+});
+
+describe('PartMesh orientation', () => {
+  const tallBox = (wound = boxTriangles([5, 7, -3], [10, 20, 60])) => buildPartMesh(new Float32Array(wound.flat(2)));
+  const worldBox = (part: { object: import('three').Object3D }) => {
+    const b = new Box3().setFromObject(part.object, true);
+    return { min: b.min.toArray(), max: b.max.toArray() };
+  };
+  const close = (got: number[], want: number[]) => got.forEach((v, i) => expect(v).toBeCloseTo(want[i]!, 9));
+
+  it('starts as read: the identity, the oriented box is the file box', () => {
+    const part = tallBox();
+    expect(part.rotation).toEqual(IDENTITY);
+    expect(part.orientedSize).toEqual([10, 20, 60]);
+  });
+
+  it('turns the drawn part and keeps its min corner on the placement point, at any unit scale', () => {
+    const part = tallBox();
+    part.setPlacement([3, 3, 2]);
+    part.setRotation(rotate90(IDENTITY, 'X'));
+    expect(part.orientedSize).toEqual([10, 60, 20]);
+    let w = worldBox(part);
+    close(w.min, [3, 3, 2]);
+    close(w.max, [13, 63, 22]);
+    part.setUnitScale(2);
+    w = worldBox(part);
+    close(w.min, [3, 3, 2]);
+    close(w.max, [23, 123, 42]);
+    // placement set after the rotation still lands the rotated min corner
+    part.setPlacement([0, 0, 0]);
+    close(worldBox(part).min, [0, 0, 0]);
+  });
+
+  it('a lay-flat turn that is not axis-aligned still sits on the placement point', () => {
+    const part = tallBox();
+    part.setRotation(layFlat(IDENTITY, [1, 1, 1]));
+    part.setPlacement([10, 20, 0]);
+    const w = worldBox(part);
+    close(w.min, [10, 20, 0]);
+    close(w.max.map((v, i) => v - w.min[i]!), [...part.orientedSize]);
+  });
+
+  it('refuses a mirror or a scale as a rotation and keeps the last one', () => {
+    const part = tallBox();
+    const r = rotate90(IDENTITY, 'Z');
+    part.setRotation(r);
+    expect(() => part.setRotation([1, 0, 0, 0, 1, 0, 0, 0, -1])).toThrow(RangeError);
+    expect(() => part.setRotation([2, 0, 0, 0, 2, 0, 0, 0, 2])).toThrow(RangeError);
+    expect(part.rotation).toEqual(r);
+  });
+
+  it('picks the face under a ray with its outward normal, and nothing on a miss', () => {
+    const part = tallBox(); // at the origin: 10 × 20 × 60
+    // from +X looking back along −X at the middle of the +X face
+    const ray = new Raycaster(new Vector3(100, 10, 30), new Vector3(-1, 0, 0));
+    const hit = part.pickFace(ray)!;
+    expect(hit.normal).toEqual([1, 0, 0]);
+    close([...hit.point], [10, 10, 30]);
+    expect(part.pickFace(new Raycaster(new Vector3(100, 500, 30), new Vector3(-1, 0, 0)))).toBeNull();
+  });
+
+  it('gives the normal facing the viewer for a mesh wound inward, and through the current rotation', () => {
+    const inward = tallBox(reversed(boxTriangles([5, 7, -3], [10, 20, 60])));
+    const hit = inward.pickFace(new Raycaster(new Vector3(100, 10, 30), new Vector3(-1, 0, 0)))!;
+    expect(hit.normal).toEqual([1, 0, 0]);
+    const part = tallBox();
+    part.setRotation(rotate90(IDENTITY, 'Z')); // file +Y now faces −X; drawn 20 × 10 × 60
+    const fromLeft = part.pickFace(new Raycaster(new Vector3(-100, 5, 30), new Vector3(1, 0, 0)))!;
+    expect(fromLeft.normal).toEqual([0, 1, 0]); // file axes
+    // laying that face flat puts the 20 mm side up
+    part.setRotation(layFlat(part.rotation, fromLeft.normal));
+    expect(part.orientedSize[2]).toBeCloseTo(20, 12);
   });
 });

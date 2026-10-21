@@ -101,6 +101,9 @@ export function asciiStl(tris: readonly Triangle[], name: string): Uint8Array {
 export const CUBE_MIN: Point = [10, -5, 3];
 export const CUBE_SIZE: Point = [20, 20, 20];
 
+export const TALL_BOX_MIN: Point = [5, 7, -3];
+export const TALL_BOX_SIZE: Point = [10, 20, 80];
+
 const cube = boxTriangles(CUBE_MIN, CUBE_SIZE);
 const openBox = cube.slice(0, 2).concat(cube.slice(4)); // no top face: 10 triangles
 const bowtie = boxTriangles([0, 0, 0], [10, 10, 10]).concat(boxTriangles([10, 10, 0], [10, 10, 10]));
@@ -115,6 +118,8 @@ export function buildFixtures(): Record<string, Uint8Array> {
     'open-box.stl': binaryStl(openBox, 'binary open box: 20 mm cube without its top face'),
     'bowtie.stl': binaryStl(bowtie, 'binary bowtie: two 10 mm cubes sharing one edge'),
     'cube-reversed-winding.stl': binaryStl(reversed(cube), 'binary 20 mm cube, every triangle wound inward'),
+    // Too tall for the cutting area as read (80 + 3 mm of allowance > 76); fits lying down.
+    'box-10x20x80.stl': binaryStl(boxTriangles(TALL_BOX_MIN, TALL_BOX_SIZE), 'binary box 10 x 20 x 80, off the origin'),
   };
 }
 

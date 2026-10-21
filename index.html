@@ -44,6 +44,21 @@
       #fit-verdict[data-tone='ok'] { color: #8fd18f; }
       #fit-verdict[data-tone='warn'] { color: #ffd479; }
       #fit-verdict[data-tone='bad'] { color: #ff8a80; }
+      #orient { margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid #3a4048; }
+      #orient h2 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+      #orient .row { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; margin: 4px 0 0; }
+      #orient .label { color: #8b96a3; }
+      #orient button[aria-pressed='true'] { outline: 2px solid #6fa8dc; }
+      #orient-hint { margin: 4px 0 0; color: #ffd479; }
+      #orient-hint[hidden], #orient-list[hidden] { display: none; }
+      #orient-list { margin: 6px 0 0; padding-left: 1.4em; }
+      #orient-list li { margin: 0 0 4px; }
+      #orient-list li[data-current='true'] strong::after { content: ' (current)'; font-weight: 400; color: #8b96a3; }
+      #orient-list small { color: #8b96a3; }
+      #orient-list output[data-tone='ok'] { color: #8fd18f; }
+      #orient-list output[data-tone='warn'] { color: #ffd479; }
+      #orient-list output[data-tone='bad'] { color: #ff8a80; }
+      #orient .note { margin: 4px 0 0; color: #8b96a3; font-size: 12px; }
       #load-status { margin: 8px 0 0; }
       #load-status:empty { display: none; }
       #load-status.error { color: #ff8a80; }
@@ -74,6 +89,23 @@
         <dt>Format</dt><dd><output id="part-format" data-testid="part-format">–</output></dd>
         <dt>Triangles</dt><dd><output id="part-triangles" data-testid="part-triangles">–</output></dd>
       </dl>
+      <section id="orient" aria-label="Orientation">
+        <h2>Orientation</h2>
+        <div class="row" role="group" aria-label="Rotate 90 degrees">
+          <span class="label">Rotate 90°</span>
+          <button type="button" data-action="rotate" data-axis="X" data-testid="rotate-x" disabled>X</button>
+          <button type="button" data-action="rotate" data-axis="Y" data-testid="rotate-y" disabled>Y</button>
+          <button type="button" data-action="rotate" data-axis="Z" data-testid="rotate-z" disabled>Z</button>
+          <button type="button" data-action="reset" data-testid="orient-reset" disabled>As read</button>
+        </div>
+        <div class="row">
+          <button id="lay-flat" type="button" data-action="lay-flat" data-testid="lay-flat" aria-pressed="false" disabled>Lay flat on a face…</button>
+          <button type="button" data-action="auto" data-testid="auto-orient" disabled>Auto-orient</button>
+        </div>
+        <p id="orient-hint" data-testid="orient-hint" role="status" hidden></p>
+        <ol id="orient-list" data-testid="orient-list" aria-label="Suggested orientations" hidden></ol>
+        <p class="note">3-axis only: undercuts are not checked.</p>
+      </section>
       <section id="stock" aria-label="Stock">
         <h2>Stock</h2>
         <output id="fit-verdict" data-testid="fit-verdict" aria-live="polite"></output>

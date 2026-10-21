@@ -4,9 +4,13 @@ import {
   DoubleSide,
   LineBasicMaterial,
   LineSegments,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
+  type Raycaster,
 } from 'three';
+import { sizeOf } from '../geom/bbox';
+import { apply, IDENTITY, isRotation, orientedBBox, triangleNormal, type Mat3 } from '../geom/orient';
 import type { BBox, Vec3 } from '../state/model';
 
 /** The loaded part as drawn on the bed. */
@@ -32,7 +36,37 @@ export interface PartMesh {
   readonly placement: Vec3;
   /** Moves the part so its bbox min corner sits at `at` (bed frame, mm), at the current unit scale. */
   setPlacement(at: Vec3): void;
+  /** The triangle soup as read, file units (never rotated or scaled in place). */
+  readonly positions: Float32Array;
+  /** File axes -> machine axes (the identity until set). */
+  readonly rotation: Mat3;
+  /** The box around the part once rotated, file units (min and max; translate and scale it to place it). */
+  readonly orientedBBox: BBox;
+  /** Extent of the rotated part along each machine axis, file units. */
+  readonly orientedSize: Vec3;
+  /**
+   * Turns the part to `rotation` (world = R · file), keeping its bbox min corner
+   * at the placement point. Throws RangeError on a matrix that is not a proper
+   * rotation (a mirror, a scale, a non-finite entry).
+   */
+  setRotation(rotation: Mat3): void;
+  /**
+   * The triangle under the ray, nearest first, with its normal in file axes
+   * turned to face the viewer (so a face seen from outside gives its outward
+   * normal even when the mesh is wound inward); null on a miss or a
+   * degenerate triangle. The edge overlays are not hit.
+   */
+  pickFace(raycaster: Raycaster): FacePick | null;
   dispose(): void;
+}
+
+/** A picked face of the part. */
+export interface FacePick {
+  readonly triangle: number;
+  /** Unit normal in file axes, facing the viewer. */
+  readonly normal: Vec3;
+  /** Where the ray hit, machine axes, mm. */
+  readonly point: Vec3;
 }
 
 /** Problem edges to draw, as segment endpoints in the same file space as the positions (6 numbers per edge). */
@@ -71,6 +105,11 @@ function edgeOverlay(segments: Float32Array, color: number, name: string): LineS
  * positions array is used as is (no copy) and stays in file space; placement
  * is the mesh's own translation, so the file-space box stays available.
  *
+ * Orientation (`setRotation`) is the mesh's own rotation too: the box of the
+ * rotated vertices is recomputed from the positions (exactly, from the file
+ * box's corners, for a quarter-turn orientation) and its min corner is what
+ * sits on the placement point.
+ *
  * `problems`, when given, are drawn as coloured lines that are children of the
  * mesh, so they move with it: open edges red, non-manifold edges magenta (the cutting-area box is already orange).
  */
@@ -97,14 +136,21 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
   });
   const mesh = new Mesh(geometry, material);
   mesh.name = 'part';
+  const fileBBox: BBox = { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] };
   let unitScale = 1;
   let placement: Vec3 = [0, 0, 0];
+  let rotation: Mat3 = IDENTITY;
+  let oriented: BBox = fileBBox;
+  const m4 = new Matrix4();
+  // world = placement + scale · (R · p − orientedMin): the rotated box's min corner lands on the placement point.
   const place = (): void => {
+    m4.set(rotation[0], rotation[1], rotation[2], 0, rotation[3], rotation[4], rotation[5], 0, rotation[6], rotation[7], rotation[8], 0, 0, 0, 0, 1);
+    mesh.quaternion.setFromRotationMatrix(m4);
     mesh.scale.setScalar(unitScale);
     mesh.position.set(
-      placement[0] - box.min.x * unitScale,
-      placement[1] - box.min.y * unitScale,
-      placement[2] - box.min.z * unitScale,
+      placement[0] - oriented.min[0] * unitScale,
+      placement[1] - oriented.min[1] * unitScale,
+      placement[2] - oriented.min[2] * unitScale,
     );
   };
   place();
@@ -127,7 +173,6 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
   for (const o of [openEdges, nonManifoldEdges]) if (o) mesh.add(o);
   mesh.updateMatrixWorld(true);
 
-  const fileBBox: BBox = { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] };
   return {
     object: mesh,
     fileBBox,
@@ -153,6 +198,36 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
       placement = [at[0], at[1], at[2]];
       place();
       mesh.updateMatrixWorld(true);
+    },
+    positions,
+    get rotation() {
+      return rotation;
+    },
+    get orientedBBox() {
+      return oriented;
+    },
+    get orientedSize() {
+      return sizeOf(oriented);
+    },
+    setRotation(r: Mat3) {
+      if (!isRotation(r)) throw new RangeError(`rotation must be a proper rotation matrix, got ${r.join(', ')}`);
+      rotation = [...r] as unknown as Mat3;
+      oriented = orientedBBox(positions, rotation, fileBBox);
+      place();
+      mesh.updateMatrixWorld(true);
+    },
+    pickFace(raycaster: Raycaster) {
+      mesh.updateMatrixWorld(true);
+      for (const hit of raycaster.intersectObject(mesh, false)) {
+        if (hit.faceIndex == null) continue;
+        const n = triangleNormal(positions, hit.faceIndex);
+        if (!n) return null;
+        const w = apply(rotation, n);
+        const d = raycaster.ray.direction;
+        const facing = w[0] * d.x + w[1] * d.y + w[2] * d.z > 0 ? ([-n[0] + 0, -n[1] + 0, -n[2] + 0] as Vec3) : n;
+        return { triangle: hit.faceIndex, normal: facing, point: [hit.point.x, hit.point.y, hit.point.z] };
+      }
+      return null;
     },
     dispose() {
       mesh.removeFromParent();
