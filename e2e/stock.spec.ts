@@ -189,3 +189,18 @@ test('the centre origin moves the WCS marker to the stock centre, still on top',
   near((await probe(page)).marker, [13, 13, 23]);
   expect(errors).toEqual([]);
 });
+
+test('an allowance that overflows to Infinity is refused with a message, never a pass, and the next good value recovers', async ({ page }) => {
+  const errors: string[] = [];
+  await ready(page, errors, []);
+  await loadCube(page);
+  await setNumber(page, 'allowance-xy', '1e308');
+  await expect(verdict(page)).toHaveText(/^Not checked: stock on the bed must have finite corners/);
+  await expect(verdict(page)).toHaveAttribute('data-tone', 'warn');
+  expect((await probe(page)).visible).toBe(false);
+  await expect(page.locator('#load-status')).toHaveText('Loaded cube-20mm-binary.stl.');
+  await setNumber(page, 'allowance-xy', '3');
+  await expect(verdict(page)).toHaveText('fits: part in stock with margins, stock in the cutting area');
+  near((await probe(page)).part!.min, [3, 3, 2]);
+  expect(errors).toEqual([]);
+});

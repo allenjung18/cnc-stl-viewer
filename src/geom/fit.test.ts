@@ -178,6 +178,19 @@ describe('the stock against the machine', () => {
     expect(failureText(cut[0]!)).toBe('stock exceeds cutting area X by 2.00e13 mm');
   });
 
+  it('a far stock placement (1e12 mm) still fails the cutting area by the right amount', () => {
+    const r = checkFit({ partSize: null, stock: fixed([25, 25, 25]), setup: { ...AT_ORIGIN, stockOnBed: [1e12, 0, 0] }, profile: DEFAULT_PROFILE });
+    expect(r.fits).toBe(false);
+    expect(r.failures[0]).toMatchObject({ kind: 'stock-exceeds-cutting-area', axis: 'X' });
+  });
+
+  it('sizes that overflow to Infinity (allowance or placement 1e308) are refused, never "fits"', () => {
+    const big = { xy: 1e308, top: 1, bottom: 2 };
+    expect(() => checkFit({ partSize: cubeSize(), stock: auto(big), setup: AT_ORIGIN, profile: DEFAULT_PROFILE })).toThrow(/finite/);
+    expect(() => checkFit({ partSize: null, stock: fixed([1e308, 25, 25]), setup: { ...AT_ORIGIN, stockOnBed: [1.7e308, 0, 0] }, profile: DEFAULT_PROFILE })).toThrow(/finite/);
+    expect(() => checkFit({ partSize: cubeSize(), stock: fixed([1e308, 25, 25]), setup: { ...AT_ORIGIN, stockOnBed: [1e308, 0, 0] }, profile: DEFAULT_PROFILE })).toThrow(/finite/);
+  });
+
   it('a 1e-9 mm allowance is accepted and the part fits', () => {
     const r = checkFit({ partSize: cubeSize(), stock: auto({ xy: 1e-9, top: 1e-9, bottom: 1e-9 }), setup: AT_ORIGIN, profile: DEFAULT_PROFILE });
     expect(r.fits).toBe(true);
@@ -211,6 +224,20 @@ describe('keep-out', () => {
     expect(footprintOverlap({ min: [100, 100, 0], max: [126, 126, 23] }, sensor)).toBeNull();
     const r = checkFit({ partSize: cubeSize(), stock: auto(), setup: { ...AT_ORIGIN, stockOnBed: [100, 100, 0] }, profile: withKeepOut(sensor) });
     expect(r.fits).toBe(true);
+  });
+
+  it('a far keep-out side (1e10 or 1e12 mm wide) does not hide a real 6 × 16 mm overlap', () => {
+    for (const w of [1e10, 1e12]) {
+      const wide: BBox = { min: [20, 10, 0], max: [20 + w, 30, 8] };
+      const r = checkFit({ partSize: cubeSize(), stock: auto(), setup: AT_ORIGIN, profile: withKeepOut(wide) });
+      expect(r.fits, `width ${w}`).toBe(false);
+      expect(r.failures).toEqual([{ kind: 'stock-over-keep-out', index: 0, overlapMm: [6, 16] }]);
+    }
+  });
+
+  it('a keep-out box with a non-finite corner is refused, not passed', () => {
+    const bad: BBox = { min: [20, 10, 0], max: [Infinity, 30, 8] };
+    expect(() => checkFit({ partSize: cubeSize(), stock: auto(), setup: AT_ORIGIN, profile: withKeepOut(bad) })).toThrow(RangeError);
   });
 
   it('the default profile has no keep-out box until it is measured', () => {

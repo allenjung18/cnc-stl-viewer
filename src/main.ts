@@ -65,9 +65,10 @@ function renderFit(scale: number): void {
     return;
   }
   profile = { ...DEFAULT_PROFILE, keepOut: form.keepOut };
-  keepOutMesh.update(form.keepOut);
   try {
     fit = checkFit({ partSize: partSizeMm(scale), stock: form.stock, setup: form.setup, profile });
+    keepOutMesh.update(form.keepOut); // drawn only once checkFit has found its corners finite
+    part?.setPlacement(fit.partOnBed ?? [0, 0, 0]);
   } catch (e) {
     fit = null;
     stockMesh.update({ stockBox: null, wcs: null, failed: false });
@@ -75,7 +76,6 @@ function renderFit(scale: number): void {
     return;
   }
   stockMesh.update({ stockBox: fit.stockBox, wcs: fit.wcs, failed: !fit.fits });
-  part?.setPlacement(fit.partOnBed ?? [0, 0, 0]);
   stockPanel.show(fitVerdict(fit), fitRows(fit));
 }
 

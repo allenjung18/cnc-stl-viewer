@@ -56,12 +56,19 @@ export interface FitReport {
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 
 /**
- * Float noise must not fail a part that fits exactly (0.1 + 0.2 > 0.3): an
- * overshoot counts only above a tolerance relative to the numbers compared.
+ * Whether `a - b` is a real overshoot. Float noise must not fail a part that
+ * fits exactly (0.1 + 0.2 > 0.3), so the difference must clear a tolerance
+ * relative to the two numbers subtracted, and only those: a far-away
+ * coordinate elsewhere must never widen it.
  */
-function exceeds(overshoot: number, ...scale: number[]): boolean {
-  const tol = 1e-9 * Math.max(1, ...scale.map(Math.abs));
-  return overshoot > tol;
+function exceeds(a: number, b: number): boolean {
+  return a - b > 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+}
+
+function assertFiniteBox(label: string, box: BBox): void {
+  if (![...box.min, ...box.max].every(Number.isFinite)) {
+    throw new RangeError(`${label} must have finite corners, got ${box.min.join(', ')} to ${box.max.join(', ')}`);
+  }
 }
 
 function assertFinite(label: string, v: Vec3 | readonly number[], min: number, inclusive: boolean): void {
@@ -107,7 +114,7 @@ export function partInStockFailures(partSize: Vec3, stockSize: Vec3, allowance: 
   const out: FitFailure[] = [];
   AXES.forEach((axis, i) => {
     const over = need[i]! - stockSize[i]!;
-    if (exceeds(over, need[i]!, stockSize[i]!)) out.push({ kind: 'part-exceeds-stock', axis, overshootMm: over });
+    if (exceeds(need[i]!, stockSize[i]!)) out.push({ kind: 'part-exceeds-stock', axis, overshootMm: over });
   });
   return out;
 }
@@ -118,21 +125,21 @@ export function partInStockFailures(partSize: Vec3, stockSize: Vec3, allowance: 
  */
 export function outsideBy(box: BBox, limit: BBox): Vec3 {
   const o = [0, 1, 2].map((i) => {
-    const scale = [limit.min[i]!, limit.max[i]!, box.min[i]!, box.max[i]!];
-    const below = limit.min[i]! - box.min[i]!;
-    const above = box.max[i]! - limit.max[i]!;
-    return (exceeds(below, ...scale) ? below : 0) + (exceeds(above, ...scale) ? above : 0);
+    const below = exceeds(limit.min[i]!, box.min[i]!) ? limit.min[i]! - box.min[i]! : 0;
+    const above = exceeds(box.max[i]!, limit.max[i]!) ? box.max[i]! - limit.max[i]! : 0;
+    return below + above;
   });
   return [o[0]!, o[1]!, o[2]!];
 }
 
 /** Plan-view (X, Y) overlap of two boxes, mm per axis; null when they do not overlap (touching is not overlap). */
 export function footprintOverlap(a: BBox, b: BBox): [number, number] | null {
-  const ox = Math.min(a.max[0], b.max[0]) - Math.max(a.min[0], b.min[0]);
-  const oy = Math.min(a.max[1], b.max[1]) - Math.max(a.min[1], b.min[1]);
-  const scale = [a.min[0], a.max[0], a.min[1], a.max[1], b.min[0], b.max[0], b.min[1], b.max[1]];
-  if (!exceeds(ox, ...scale) || !exceeds(oy, ...scale)) return null;
-  return [ox, oy];
+  const hiX = Math.min(a.max[0], b.max[0]);
+  const loX = Math.max(a.min[0], b.min[0]);
+  const hiY = Math.min(a.max[1], b.max[1]);
+  const loY = Math.max(a.min[1], b.min[1]);
+  if (!exceeds(hiX, loX) || !exceeds(hiY, loY)) return null;
+  return [hiX - loX, hiY - loY];
 }
 
 /** The WCS origin for a stock box on the bed: Z0 on the stock top, at its front-left corner or its centre. */
@@ -180,7 +187,12 @@ export function checkFit({ partSize, stock, setup, profile }: FitInput): FitRepo
     return { stockSize: null, stockBox: null, partOffset: null, partOnBed: null, wcs: null, zLeftMm: null, failures, fits: false };
   }
 
+  // Finite inputs can still sum to Infinity (an allowance of 1e308); that is an input error, never a pass.
   const stockBox: BBox = { min: setup.stockOnBed, max: add(setup.stockOnBed, stockSize) };
+  assertFiniteBox('stock on the bed', stockBox);
+  const partOnBed = partOffset ? add(setup.stockOnBed, partOffset) : null;
+  if (partOnBed) assertFinite('part on the bed', partOnBed, -Infinity, false);
+  (profile.keepOut ?? []).forEach((box, i) => assertFiniteBox(`keep-out box ${i + 1}`, box));
   const { cutting, travel } = machineBoxes(profile);
   const outCutting = outsideBy(stockBox, cutting);
   const outTravel = outsideBy(stockBox, travel);
@@ -199,7 +211,7 @@ export function checkFit({ partSize, stock, setup, profile }: FitInput): FitRepo
     stockSize,
     stockBox,
     partOffset,
-    partOnBed: partOffset ? add(setup.stockOnBed, partOffset) : null,
+    partOnBed,
     wcs: wcsOrigin(stockBox, setup.origin),
     zLeftMm: cutting.max[2] - stockBox.max[2],
     failures,
