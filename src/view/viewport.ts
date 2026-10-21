@@ -1,7 +1,8 @@
-import { PerspectiveCamera, Vector3, WebGLRenderer, type Scene } from 'three';
+import { OrthographicCamera, PerspectiveCamera, Vector3, WebGLRenderer, type Scene } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { BBox } from '../state/model';
 import { applyZUp } from './scene';
+import { frameView, orthoToPerspective, perspectiveToOrtho, setOrthoFrustum, type StandardView } from './views';
 
 /** Centre of a box, mm. */
 export function boxCentre(box: BBox): Vector3 {
@@ -50,33 +51,43 @@ export function frameHome(camera: PerspectiveCamera, aspect: number, frame: BBox
   camera.updateMatrixWorld(true);
 }
 
-/** Renderer, camera and orbit controls bound to one container element. Renders on demand. */
+/** Renderer, a perspective and an orthographic camera, and orbit controls bound to one container element. Renders on demand. */
 export class Viewport {
   readonly renderer: WebGLRenderer;
-  readonly camera: PerspectiveCamera;
+  readonly perspective: PerspectiveCamera;
+  /** True scale: what CNC people check dimensions in. Toggled with `O`. */
+  readonly ortho: OrthographicCamera;
   readonly controls: OrbitControls;
+  private active: PerspectiveCamera | OrthographicCamera;
   private readonly resizeObserver: ResizeObserver;
   private frameRequested = false;
-  /** Until the user orbits, pans or zooms, a resize re-frames the home view for the new aspect. */
+  /** Until the user orbits, pans, zooms or picks a view, a resize re-frames the home view for the new aspect. */
   private userMoved = false;
+  private readonly afterRender: Array<() => void> = [];
+  /** The standard view last picked, or null once the user orbits away from it (or before any). */
+  private currentView: StandardView | null = null;
 
   constructor(
     private readonly container: HTMLElement,
-    private readonly scene: Scene,
-    private readonly frame: BBox,
+    private scene: Scene,
+    private frame: BBox,
   ) {
     this.renderer = new WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(this.renderer.domElement);
 
-    const aspect = Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight);
-    this.camera = createCamera(aspect, frame);
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    const aspect = this.aspect();
+    this.perspective = createCamera(aspect, frame);
+    this.ortho = new OrthographicCamera(-1, 1, 1, -1, 1, 10_000);
+    perspectiveToOrtho(this.perspective, this.ortho, boxCentre(frame), aspect);
+    this.active = this.perspective;
+    this.controls = new OrbitControls(this.perspective, this.renderer.domElement);
     this.controls.target.copy(boxCentre(frame));
     this.controls.update();
     this.controls.addEventListener('change', () => this.requestRender());
     this.controls.addEventListener('start', () => {
       this.userMoved = true;
+      this.currentView = null;
     });
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -84,12 +95,94 @@ export class Viewport {
     this.resize();
   }
 
+  /** The camera the view is drawn with. */
+  get camera(): PerspectiveCamera | OrthographicCamera {
+    return this.active;
+  }
+
+  get isOrtho(): boolean {
+    return this.active === this.ortho;
+  }
+
+  get view(): StandardView | null {
+    return this.currentView;
+  }
+
+  private aspect(): number {
+    return Math.max(1, this.container.clientWidth) / Math.max(1, this.container.clientHeight);
+  }
+
+  /** Swaps in a rebuilt scene (a new machine profile) and the box the home view frames. */
+  setScene(scene: Scene, frame: BBox): void {
+    this.scene = scene;
+    this.frame = frame;
+    if (!this.userMoved) this.home();
+    this.requestRender();
+  }
+
+  /** Runs `fn` after every frame is drawn (overlays that follow the camera). */
+  onAfterRender(fn: () => void): void {
+    this.afterRender.push(fn);
+  }
+
+  private home(): void {
+    const aspect = this.aspect();
+    const target = boxCentre(this.frame);
+    frameHome(this.perspective, aspect, this.frame);
+    if (this.isOrtho) perspectiveToOrtho(this.perspective, this.ortho, target, aspect);
+    this.controls.target.copy(target);
+    this.controls.update();
+  }
+
+  /** Shows `frame` (default: the machine's travel) from a standard view, in the current projection. */
+  setView(view: StandardView, frame: BBox = this.frame): void {
+    const target = frameView(view, frame, this.aspect(), this.perspective, this.ortho);
+    this.userMoved = true;
+    this.controls.target.copy(target);
+    this.controls.update();
+    this.currentView = view;
+    this.requestRender();
+  }
+
+  /** Re-frames `frame` from the current viewing direction. */
+  fit(frame: BBox = this.frame): void {
+    const direction = this.active.position.clone().sub(this.controls.target);
+    if (direction.lengthSq() === 0) direction.set(0, -1, 0);
+    const view = this.currentView;
+    const target = frameView(view ?? direction, frame, this.aspect(), this.perspective, this.ortho);
+    this.userMoved = true;
+    this.controls.target.copy(target);
+    this.controls.update();
+    this.currentView = view;
+    this.requestRender();
+  }
+
+  /** Orthographic (true scale) on or off; the view direction, target and apparent size are kept. */
+  setOrtho(on: boolean): void {
+    if (on === this.isOrtho) return;
+    const aspect = this.aspect();
+    const target = this.controls.target;
+    if (on) perspectiveToOrtho(this.perspective, this.ortho, target, aspect);
+    else orthoToPerspective(this.ortho, this.perspective, target, aspect);
+    this.active = on ? this.ortho : this.perspective;
+    const view = this.currentView;
+    this.controls.object = this.active;
+    this.controls.update();
+    this.currentView = view;
+    this.requestRender();
+  }
+
+  toggleOrtho(): void {
+    this.setOrtho(!this.isOrtho);
+  }
+
   requestRender(): void {
     if (this.frameRequested) return;
     this.frameRequested = true;
     requestAnimationFrame(() => {
       this.frameRequested = false;
-      this.renderer.render(this.scene, this.camera);
+      this.renderer.render(this.scene, this.active);
+      for (const fn of this.afterRender) fn();
     });
   }
 
@@ -98,12 +191,12 @@ export class Viewport {
     const height = Math.max(1, this.container.clientHeight);
     this.renderer.setSize(width, height, false);
     if (this.userMoved) {
-      this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
+      const aspect = width / height;
+      this.perspective.aspect = aspect;
+      this.perspective.updateProjectionMatrix();
+      setOrthoFrustum(this.ortho, aspect, (this.ortho.top - this.ortho.bottom) / 2);
     } else {
-      frameHome(this.camera, width / height, this.frame);
-      this.controls.target.copy(boxCentre(this.frame));
-      this.controls.update();
+      this.home();
     }
     this.requestRender();
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkFit } from '../geom/fit';
-import { DEFAULT_PROFILE } from '../state/profiles';
-import { fitRows, fitVerdict, readStockForm, type StockFormValues } from './stockPanel';
+import { DEFAULT_PROFILE, DEFAULT_SAVED_PROFILE, parseProfile, profileToJson, type SavedProfile } from '../state/profiles';
+import { fitRows, fitVerdict, formValuesOf, readStockForm, savedFromForm, type StockFormValues } from './stockPanel';
 
 const DEFAULTS: StockFormValues = {
   mode: 'auto',
@@ -116,5 +116,47 @@ describe('fitRows', () => {
   it('no stock, no rows', () => {
     expect(fitRows(null)).toEqual([]);
     expect(fitRows(fitFor({}, null))).toEqual([]);
+  });
+});
+
+describe('formValuesOf and savedFromForm', () => {
+  const custom: SavedProfile = {
+    machine: { ...DEFAULT_PROFILE, keepOut: [{ min: [150, 10, 0], max: [180.5, 40, 12] }] },
+    stock: { mode: 'fixed', allowance: { xy: 2.5, top: 0, bottom: 1 }, size: [101.6, 50.8, 19.05] },
+    setup: { origin: 'center-top', stockOnBed: [-4, 7.25, 0] },
+  };
+
+  it('the default profile shows exactly the page defaults', () => {
+    expect(formValuesOf(DEFAULT_SAVED_PROFILE)).toEqual(DEFAULTS);
+  });
+
+  it('profile -> inputs -> profile is the identity, through the JSON file too', () => {
+    for (const p of [DEFAULT_SAVED_PROFILE, custom]) {
+      const back = savedFromForm(formValuesOf(p), p.machine, DEFAULT_SAVED_PROFILE);
+      expect(back).toEqual({ ...p, machine: { ...p.machine, keepOut: p.machine.keepOut ?? [] } });
+      const file = parseProfile(profileToJson(back!));
+      expect(file.ok && file.profile).toEqual(back);
+    }
+  });
+
+  it('shows the keep-out box as on with its corner and size', () => {
+    const v = formValuesOf(custom);
+    expect(v).toMatchObject({ keepOutOn: true, keepOutX: '150', keepOutY: '10', keepOutW: '30.5', keepOutD: '30', keepOutH: '12' });
+  });
+
+  it('an invalid input saves nothing (the last good profile stays)', () => {
+    expect(savedFromForm({ ...DEFAULTS, xy: '' }, DEFAULT_PROFILE, custom)).toBeNull();
+    expect(savedFromForm({ ...DEFAULTS, top: '-1' }, DEFAULT_PROFILE, custom)).toBeNull();
+    expect(savedFromForm({ ...DEFAULTS, keepOutOn: true, keepOutW: '0' }, DEFAULT_PROFILE, custom)).toBeNull();
+  });
+
+  it('in auto mode keeps the block size typed, or the previous one when the block fields are not a size', () => {
+    expect(savedFromForm({ ...DEFAULTS, sizeX: '40' }, DEFAULT_PROFILE, custom)!.stock.size).toEqual([40, 25, 25]);
+    expect(savedFromForm({ ...DEFAULTS, sizeX: '' }, DEFAULT_PROFILE, custom)!.stock.size).toEqual(custom.stock.size);
+    expect(savedFromForm({ ...DEFAULTS, sizeZ: '0' }, DEFAULT_PROFILE, custom)!.stock.size).toEqual(custom.stock.size);
+  });
+
+  it('a keep-out box switched off saves none', () => {
+    expect(savedFromForm({ ...formValuesOf(custom), keepOutOn: false }, custom.machine, custom)!.machine.keepOut).toEqual([]);
   });
 });

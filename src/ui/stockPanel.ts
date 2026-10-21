@@ -6,7 +6,8 @@
  * `StockPanel` reads the inputs from the page and writes the verdict into it.
  */
 import { failureText, formatMm, type FitReport } from '../geom/fit';
-import type { BBox, Setup, Stock, Vec3, WcsOrigin } from '../state/model';
+import type { BBox, MachineProfile, Setup, Stock, Vec3, WcsOrigin } from '../state/model';
+import type { SavedProfile } from '../state/profiles';
 import { formatNumber, type PanelRow, type RowTone } from './panel';
 
 /** The raw input values, as the page holds them. */
@@ -73,6 +74,58 @@ export function readStockForm(v: StockFormValues): StockForm {
 
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, stock: { mode, allowance, size }, setup: { origin, stockOnBed }, keepOut };
+}
+
+/** The keep-out fields' values while the box is off and nothing was saved. */
+export const KEEP_OUT_FIELD_DEFAULTS = Object.freeze({ keepOutX: '0', keepOutY: '0', keepOutW: '20', keepOutD: '20', keepOutH: '10' });
+
+/** The inputs that show a saved profile. */
+export function formValuesOf(p: SavedProfile): StockFormValues {
+  const s = String;
+  const box = p.machine.keepOut?.[0];
+  return {
+    mode: p.stock.mode,
+    xy: s(p.stock.allowance.xy),
+    top: s(p.stock.allowance.top),
+    bottom: s(p.stock.allowance.bottom),
+    sizeX: s(p.stock.size[0]),
+    sizeY: s(p.stock.size[1]),
+    sizeZ: s(p.stock.size[2]),
+    bedX: s(p.setup.stockOnBed[0]),
+    bedY: s(p.setup.stockOnBed[1]),
+    origin: p.setup.origin,
+    keepOutOn: box !== undefined,
+    ...(box
+      ? {
+          keepOutX: s(box.min[0]),
+          keepOutY: s(box.min[1]),
+          keepOutW: s(box.max[0] - box.min[0]),
+          keepOutD: s(box.max[1] - box.min[1]),
+          keepOutH: s(box.max[2]),
+        }
+      : KEEP_OUT_FIELD_DEFAULTS),
+  };
+}
+
+/**
+ * The profile to save for these inputs on `machine`, or null while an input is
+ * invalid (the last good profile stays saved). In auto mode the block size is
+ * not checked by the form; it is kept from the inputs when they hold a valid
+ * size, else from `previous`.
+ */
+export function savedFromForm(values: StockFormValues, machine: MachineProfile, previous: SavedProfile): SavedProfile | null {
+  const form = readStockForm(values);
+  if (!form.ok) return null;
+  let size = form.stock.size;
+  if (form.stock.mode === 'auto') {
+    const block = readStockForm({ ...values, mode: 'fixed' });
+    size = block.ok ? block.stock.size : previous.stock.size;
+  }
+  return {
+    machine: { ...machine, keepOut: form.keepOut },
+    stock: { ...form.stock, size },
+    setup: form.setup,
+  };
 }
 
 export interface FitVerdict {
@@ -158,6 +211,31 @@ export class StockPanel {
       keepOutD: this.value('keep-out-d'),
       keepOutH: this.value('keep-out-h'),
     };
+  }
+
+  /** Puts `v` into the inputs (a loaded or imported profile). Fires no change event. */
+  write(v: StockFormValues): void {
+    this.el<HTMLInputElement>('stock-mode-fixed').checked = v.mode === 'fixed';
+    this.el<HTMLInputElement>('stock-mode-auto').checked = v.mode !== 'fixed';
+    const set = (id: string, value: string): void => {
+      this.el<HTMLInputElement>(id).value = value;
+    };
+    set('allowance-xy', v.xy);
+    set('allowance-top', v.top);
+    set('allowance-bottom', v.bottom);
+    set('stock-size-x', v.sizeX);
+    set('stock-size-y', v.sizeY);
+    set('stock-size-z', v.sizeZ);
+    set('stock-bed-x', v.bedX);
+    set('stock-bed-y', v.bedY);
+    this.el<HTMLSelectElement>('wcs-origin').value = v.origin;
+    this.el<HTMLInputElement>('keep-out-on').checked = v.keepOutOn;
+    set('keep-out-x', v.keepOutX);
+    set('keep-out-y', v.keepOutY);
+    set('keep-out-w', v.keepOutW);
+    set('keep-out-d', v.keepOutD);
+    set('keep-out-h', v.keepOutH);
+    this.syncControls();
   }
 
   /** Shows the block size only for fixed stock, and the keep-out fields only when the box is on. */

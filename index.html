@@ -59,6 +59,26 @@
       #orient-list output[data-tone='warn'] { color: #ffd479; }
       #orient-list output[data-tone='bad'] { color: #ff8a80; }
       #orient .note { margin: 4px 0 0; color: #8b96a3; font-size: 12px; }
+      #view, #profile { margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid #3a4048; }
+      #view h2, #profile h2 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+      #view .row, #profile .row { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; margin: 4px 0 0; }
+      #view .label { color: #8b96a3; }
+      #view button[aria-pressed='true'] { outline: 2px solid #6fa8dc; }
+      #view kbd { font: 11px ui-monospace, monospace; color: #8b96a3; }
+      #measure-info { margin: 4px 0 0; }
+      #measure-info:empty { display: none; }
+      #view .note, #profile .note { margin: 4px 0 0; color: #8b96a3; font-size: 12px; }
+      #profile-status { margin: 4px 0 0; }
+      #profile-status:empty { display: none; }
+      #profile-status[data-tone='bad'] { color: #ff8a80; }
+      #profile-status[data-tone='ok'] { color: #8fd18f; }
+      #setup-sheet { width: 100%; box-sizing: border-box; min-height: 9em; margin: 4px 0 0; font: 12px ui-monospace, monospace; }
+      #setup-sheet[hidden] { display: none; }
+      #measure-label {
+        position: fixed; transform: translate(-50%, -130%); pointer-events: none; padding: 2px 6px; border-radius: 4px;
+        background: rgba(20, 23, 27, 0.9); color: #ffd479; font: 600 12px system-ui, sans-serif; white-space: nowrap;
+      }
+      #measure-label[hidden] { display: none; }
       #load-status { margin: 8px 0 0; }
       #load-status:empty { display: none; }
       #load-status.error { color: #ff8a80; }
@@ -89,6 +109,21 @@
         <dt>Format</dt><dd><output id="part-format" data-testid="part-format">–</output></dd>
         <dt>Triangles</dt><dd><output id="part-triangles" data-testid="part-triangles">–</output></dd>
       </dl>
+      <section id="view" aria-label="View">
+        <h2>View</h2>
+        <div class="row" role="group" aria-label="Standard views">
+          <button type="button" data-view="top" data-testid="view-top">Top <kbd>1</kbd></button>
+          <button type="button" data-view="front" data-testid="view-front">Front <kbd>2</kbd></button>
+          <button type="button" data-view="right" data-testid="view-right">Right <kbd>3</kbd></button>
+          <button type="button" data-view="iso" data-testid="view-iso">Iso <kbd>4</kbd></button>
+        </div>
+        <div class="row">
+          <button id="ortho-toggle" type="button" data-testid="ortho-toggle" aria-pressed="false">Orthographic <kbd>O</kbd></button>
+          <button id="view-fit" type="button" data-testid="view-fit">Fit <kbd>F</kbd></button>
+          <button id="measure-toggle" type="button" data-testid="measure-toggle" aria-pressed="false" disabled>Measure…</button>
+        </div>
+        <p id="measure-info" data-testid="measure-info" role="status"></p>
+      </section>
       <section id="orient" aria-label="Orientation">
         <h2>Orientation</h2>
         <div class="row" role="group" aria-label="Rotate 90 degrees">
@@ -156,8 +191,21 @@
           </div>
         </fieldset>
       </section>
+      <section id="profile" aria-label="Profile">
+        <h2>Profile and setup sheet</h2>
+        <div class="row">
+          <button id="profile-export" type="button" data-testid="profile-export">Export profile</button>
+          <button id="profile-import" type="button" data-testid="profile-import">Import profile…</button>
+          <input id="profile-file" data-testid="profile-file" type="file" accept=".json,application/json" hidden />
+          <button id="copy-setup" type="button" data-testid="copy-setup">Copy setup sheet</button>
+        </div>
+        <p id="profile-status" data-testid="profile-status" role="status" aria-live="polite"></p>
+        <textarea id="setup-sheet" data-testid="setup-sheet" readonly hidden aria-label="Setup sheet"></textarea>
+        <p class="note">The machine, stock and origin are kept in this browser; export them to move to another PC.</p>
+      </section>
       <p id="load-status" role="status" aria-live="polite"></p>
     </aside>
+    <div id="measure-label" data-testid="measure-label" hidden></div>
     <div id="drop-overlay" hidden>Drop the STL to load it</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
