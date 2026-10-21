@@ -141,6 +141,8 @@ const NUMBER = (s: string | undefined): number => (s === undefined || s.trim() =
 const attr = (n: string): RegExp => new RegExp(`(?:^|\\s)${n}\\s*=\\s*["']([^"']*)`);
 const VX = attr('x'), VY = attr('y'), VZ = attr('z');
 const V1 = attr('v1'), V2 = attr('v2'), V3 = attr('v3');
+/** Object types that are not the part: print supports (both kinds) and "other" (spec: never built). */
+const NOT_BUILT = new Set(['support', 'solidsupport', 'other']);
 /** The soup is at most as large as the biggest STL the viewer reads. */
 export const MAX_3MF_TRIANGLES = Math.floor(MAX_STL_BYTES / 50);
 
@@ -190,7 +192,7 @@ export function parseModelXml(xml: string, onProgress?: (done: number, total: nu
     if (name === 'model') {
       sawModel = true;
       const u = a.unit ?? 'millimeter';
-      if (!(u in THREEMF_UNITS)) throw new StlError(`The 3MF states a unit this viewer does not know: "${u}".`);
+      if (!Object.hasOwn(THREEMF_UNITS, u)) throw new StlError(`The 3MF states a unit this viewer does not know: "${u}".`);
       unit = u as ThreeMfUnit;
     } else if (name === 'object') {
       if (a.id === undefined) throw new StlError('The 3MF has an object without an id.');
@@ -231,7 +233,7 @@ export function parseModelXml(xml: string, onProgress?: (done: number, total: nu
     if (known !== undefined) return known;
     const o = lookup(objects, id, depth);
     const n =
-      o.type === 'support' || o.type === 'other'
+      NOT_BUILT.has(o.type)
         ? 0
         : o.kind === 'mesh'
           ? o.triangles.length / 3

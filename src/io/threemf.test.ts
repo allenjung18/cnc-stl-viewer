@@ -71,6 +71,10 @@ describe('parse3mf: units, transforms, components', () => {
     }
     expect(parseModel(modelXml(null, [unitCube(1)], ['<item objectid="1" />'])).unit).toBe('millimeter');
     expect(refusal(() => parseModel(modelXml('furlong', [unitCube(1)], ['<item objectid="1" />'])))).toMatch(/unit .*"furlong"/);
+    // Names every object inherits are not units either (else the scale is a function or NaN).
+    for (const bad of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(refusal(() => parseModel(modelXml(bad, [unitCube(1)], ['<item objectid="1" />'])))).toMatch(new RegExp(`unit this viewer does not know: "${bad}"`));
+    }
   });
 
   it('reads a deflated package the same as a stored one', () => {
@@ -98,9 +102,13 @@ describe('parse3mf: units, transforms, components', () => {
     expect(inspectMesh(m.positions).stats.bbox).toEqual({ min: [0, 0, 0], max: [12, 2, 12] });
   });
 
-  it('skips support and other objects, refuses when nothing is left to build', () => {
-    const m = parseModel(modelXml('millimeter', [unitCube(1), meshObjectXml(2, indexed(boxTriangles([5, 5, 5], [1, 1, 1])), 'support')], ['<item objectid="1" />', '<item objectid="2" />']));
-    expect(m.triangles).toBe(12);
+  it('skips support, solidsupport and other objects, refuses when nothing is left to build', () => {
+    for (const type of ['support', 'solidsupport', 'other']) {
+      const m = parseModel(modelXml('millimeter', [unitCube(1), meshObjectXml(2, indexed(boxTriangles([5, 5, 5], [1, 1, 1])), type)], ['<item objectid="1" />', '<item objectid="2" />']));
+      expect(m.triangles, type).toBe(12);
+    }
+    // A surface object is part of the part: built.
+    expect(parseModel(modelXml('millimeter', [unitCube(1), meshObjectXml(2, indexed(boxTriangles([5, 5, 5], [1, 1, 1])), 'surface')], ['<item objectid="1" />', '<item objectid="2" />'])).triangles).toBe(24);
     expect(refusal(() => parseModel(modelXml('millimeter', [meshObjectXml(2, indexed(boxTriangles([0, 0, 0], [1, 1, 1])), 'support')], ['<item objectid="2" />'])))).toMatch(/no triangles to build/);
   });
 
