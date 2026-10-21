@@ -7,7 +7,8 @@
  * is pure too; `UnitsBadge` writes it into the page and reports the toggle.
  */
 import { MM_PER_INCH, type UnitChoice, type UnitHint } from '../geom/units';
-import type { StlFormat } from '../io/sniff';
+import type { FileUnits } from '../io/parse';
+import { formatName, type MeshFormat } from '../io/sniff';
 import type { MeshStats } from '../state/model';
 
 export type RowTone = 'ok' | 'warn' | 'bad';
@@ -24,7 +25,7 @@ export interface PanelRow {
 
 export interface PartSummary {
   readonly name: string;
-  readonly format: StlFormat;
+  readonly format: MeshFormat;
   readonly stats: MeshStats;
 }
 
@@ -58,7 +59,7 @@ export function partRows({ name, format, stats: s }: PartSummary, colours: { ope
 
   return [
     { key: 'name', label: 'Part', value: name },
-    { key: 'format', label: 'Format', value: format === 'stl-bin' ? 'binary STL' : 'ASCII STL' },
+    { key: 'format', label: 'Format', value: formatName(format) },
     { key: 'size', label: 'Size X × Y × Z', value: `${s.size.map(formatNumber).join(' × ')} mm` },
     { key: 'volume', label: 'Volume', value: volumeText, tone: s.watertight && !s.flippedHint ? undefined : 'warn' },
     { key: 'area', label: 'Surface area', value: `${formatNumber(s.areaMm2)} mm²` },
@@ -102,10 +103,10 @@ export function partRows({ name, format, stats: s }: PartSummary, colours: { ope
 }
 
 /** The rows for a part that loaded but could not be inspected. */
-export function uninspectedRows(name: string, format: StlFormat, triangles: number, reason: string): PanelRow[] {
+export function uninspectedRows(name: string, format: MeshFormat, triangles: number, reason: string): PanelRow[] {
   return [
     { key: 'name', label: 'Part', value: name },
-    { key: 'format', label: 'Format', value: format === 'stl-bin' ? 'binary STL' : 'ASCII STL' },
+    { key: 'format', label: 'Format', value: formatName(format) },
     { key: 'triangles', label: 'Triangles', value: count(triangles) },
     { key: 'inspection', label: 'Inspection', value: `not run: ${reason}`, tone: 'warn' },
   ];
@@ -120,11 +121,20 @@ export interface UnitsBadgeView {
   /** A heuristic hint, or null; never acted on without the user. */
   readonly hint: string | null;
   readonly hintTone: RowTone | undefined;
+  /** The file states its unit (3MF): the toggle is disabled. */
+  readonly locked: boolean;
 }
 
 /** The badge for a units choice and the hint for the loaded part (`null` when none or no part). */
-export function unitsBadge(choice: UnitChoice, hint: UnitHint | null): UnitsBadgeView {
+export function unitsBadge(choice: UnitChoice, hint: UnitHint | null, fileUnits?: FileUnits | null): UnitsBadgeView {
+  if (fileUnits) {
+    // The file says: no guess, no toggle, and the user's choice for STL files is kept for the next one.
+    const value =
+      fileUnits.mmPerUnit === 1 ? 'mm (from the file)' : `${fileUnits.unit} (from the file, ×${fileUnits.mmPerUnit} to mm)`;
+    return { value, toggleLabel: 'Set by the file', hint: null, hintTone: undefined, locked: true };
+  }
   return {
+    locked: false,
     value: choice === 'in' ? `inches (×${MM_PER_INCH})` : 'mm (STL has no units)',
     toggleLabel: choice === 'in' ? 'Treat as mm' : `Treat as inches (×${MM_PER_INCH})`,
     hint: hint ? hint.text : null,
@@ -146,6 +156,7 @@ export class UnitsBadge {
   show(view: UnitsBadgeView): void {
     this.value.textContent = view.value;
     this.toggle.textContent = view.toggleLabel;
+    this.toggle.disabled = view.locked;
     this.hint.textContent = view.hint ?? '';
     this.hint.hidden = view.hint === null;
     if (view.hintTone) this.hint.dataset.tone = view.hintTone;

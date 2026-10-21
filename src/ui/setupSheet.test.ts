@@ -72,6 +72,14 @@ describe('setupSheet', () => {
     expect(text).toContain('Units: file read as inches (×25.4)');
     expect(text).toContain('Keep-out boxes checked: 1');
   });
+
+  it('a unit stated by the file (3MF) wins over the STL choice', () => {
+    expect(setupSheet(input({ units: 'in', fileUnits: { unit: 'millimeter', mmPerUnit: 1 } }))).toContain('Units: millimeter, stated by the file\n');
+    expect(setupSheet(input({ fileUnits: { unit: 'inch', mmPerUnit: 25.4 } }, [25.4, 25.4, 25.4]))).toContain(
+      'Units: inch, stated by the file (×25.4 to mm)',
+    );
+    expect(setupSheet(input({ fileUnits: null }))).toContain('Units: file read as mm');
+  });
 });
 
 describe('orientationText', () => {

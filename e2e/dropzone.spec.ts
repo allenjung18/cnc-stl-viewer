@@ -88,7 +88,7 @@ test('the Open button file picker loads a file too', async ({ page }) => {
   const errors: string[] = [];
   await ready(page, errors, []);
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Open STL…' }).click();
+  await page.getByRole('button', { name: 'Open STL or 3MF…' }).click();
   await (await chooser).setFiles('test/fixtures/cube-20mm-ascii.stl');
   await expect(triangles(page)).toHaveText('12');
   await expect(page.locator('#part-format')).toHaveText('ASCII STL');

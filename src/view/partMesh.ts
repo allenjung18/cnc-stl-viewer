@@ -24,6 +24,10 @@ export interface PartMesh {
   readonly openEdges: LineSegments | null;
   /** Non-manifold edges drawn over the part, or null when there are none. */
   readonly nonManifoldEdges: LineSegments | null;
+  /** The outline (feature edges), or null when there are none or they were skipped on a large mesh. */
+  readonly featureEdges: LineSegments | null;
+  /** Shows or hides the outline; a no-op without one. */
+  setFeatureEdgesVisible(on: boolean): void;
   /** File units -> mm, as drawn (1 until set). */
   readonly unitScale: number;
   /**
@@ -73,25 +77,33 @@ export interface FacePick {
 export interface ProblemEdges {
   readonly openEdgeSegments: Float32Array;
   readonly nonManifoldEdgeSegments: Float32Array;
+  /** The outline to draw, same layout; null or absent for none. */
+  readonly featureEdgeSegments?: Float32Array | null;
 }
+
+/** The outline is drawn in this colour, under the problem edges. */
+export const FEATURE_EDGE_COLOR = 0x1d2b3a;
 
 /** Open edges (a hole's rim) are drawn in this colour. */
 export const OPEN_EDGE_COLOR = 0xff3b30;
 /** Non-manifold edges (shared by more than two triangles) are drawn in this colour. */
 export const NON_MANIFOLD_EDGE_COLOR = 0xff3df5;
 
-function edgeOverlay(segments: Float32Array, color: number, name: string): LineSegments | null {
+function edgeOverlay(segments: Float32Array, color: number, name: string, throughPart = true): LineSegments | null {
   if (segments.length === 0) return null;
   if (segments.length % 6 !== 0) {
     throw new RangeError(`${name} must hold whole segments (6 numbers each), got ${segments.length}`);
   }
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(segments, 3));
-  // Drawn through the part, so an edge on the far side or inside still shows.
-  const material = new LineBasicMaterial({ color, depthTest: false, transparent: true });
+  // Problem edges are drawn through the part, so an edge on the far side or inside still shows;
+  // the outline is depth-tested, so only the edges in view draw.
+  const material = throughPart
+    ? new LineBasicMaterial({ color, depthTest: false, transparent: true })
+    : new LineBasicMaterial({ color });
   const lines = new LineSegments(geometry, material);
   lines.name = name;
-  lines.renderOrder = 1;
+  lines.renderOrder = throughPart ? 1 : 0;
   return lines;
 }
 
@@ -111,7 +123,8 @@ function edgeOverlay(segments: Float32Array, color: number, name: string): LineS
  * sits on the placement point.
  *
  * `problems`, when given, are drawn as coloured lines that are children of the
- * mesh, so they move with it: open edges red, non-manifold edges magenta (the cutting-area box is already orange).
+ * mesh, so they move with it: open edges red, non-manifold edges magenta (the cutting-area box is already orange),
+ * and the outline (feature edges) dark, depth-tested.
  */
 export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges): PartMesh {
   if (positions.length === 0 || positions.length % 9 !== 0) {
@@ -133,6 +146,10 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
     metalness: 0.05,
     // Open or inward-wound meshes still draw; the inspector reports them.
     side: DoubleSide,
+    // Pushed back a little, so the outline drawn on its edges wins the depth test.
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
   });
   const mesh = new Mesh(geometry, material);
   mesh.name = 'part';
@@ -157,7 +174,9 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
 
   let openEdges: LineSegments | null = null;
   let nonManifoldEdges: LineSegments | null = null;
+  let featureEdges: LineSegments | null = null;
   try {
+    featureEdges = edgeOverlay(problems?.featureEdgeSegments ?? new Float32Array(0), FEATURE_EDGE_COLOR, 'feature-edges', false);
     openEdges = edgeOverlay(problems?.openEdgeSegments ?? new Float32Array(0), OPEN_EDGE_COLOR, 'open-edges');
     nonManifoldEdges = edgeOverlay(
       problems?.nonManifoldEdgeSegments ?? new Float32Array(0),
@@ -165,12 +184,12 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
       'non-manifold-edges',
     );
   } catch (e) {
-    for (const o of [openEdges, nonManifoldEdges]) disposeLines(o);
+    for (const o of [openEdges, nonManifoldEdges, featureEdges]) disposeLines(o);
     geometry.dispose();
     material.dispose();
     throw e;
   }
-  for (const o of [openEdges, nonManifoldEdges]) if (o) mesh.add(o);
+  for (const o of [featureEdges, openEdges, nonManifoldEdges]) if (o) mesh.add(o);
   mesh.updateMatrixWorld(true);
 
   return {
@@ -179,6 +198,10 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
     size: [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z],
     openEdges,
     nonManifoldEdges,
+    featureEdges,
+    setFeatureEdgesVisible(on: boolean) {
+      if (featureEdges) featureEdges.visible = on;
+    },
     get unitScale() {
       return unitScale;
     },
@@ -235,6 +258,7 @@ export function buildPartMesh(positions: Float32Array, problems?: ProblemEdges):
       material.dispose();
       disposeLines(openEdges);
       disposeLines(nonManifoldEdges);
+      disposeLines(featureEdges);
     },
   };
 }

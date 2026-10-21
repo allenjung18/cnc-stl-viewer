@@ -10,11 +10,14 @@ import {
   type OrientCandidate,
   type RankedOrientation,
 } from './geom/orient';
+import { minFeatureHint, parseToolDiameter } from './geom/features';
+import { FEATURE_EDGES_MAX_TRIANGLES } from './geom/stats';
 import { scaleStats, unitHint, unitScaleOf, type UnitChoice } from './geom/units';
-import { loadStl } from './io/load';
-import { StlError, type StlFormat } from './io/sniff';
+import { loadStl, progressFraction, progressText } from './io/load';
+import type { FileUnits } from './io/parse';
+import { StlError, type MeshFormat } from './io/sniff';
 import type { BBox, MachineProfile, MeshStats, Vec3 } from './state/model';
-import { browserStorage, loadUnits, saveUnits } from './state/prefs';
+import { browserStorage, loadToolDiameter, loadUnits, saveToolDiameter, saveUnits } from './state/prefs';
 import {
   loadProfile,
   parseProfile,
@@ -59,11 +62,51 @@ let part: PartMesh | null = null;
 /** The loaded part's stats as inspected, file units. */
 let fileStats: MeshStats | null = null;
 /** What the panel rows are built from; the stats are scaled in `render`. */
-let shown: { name: string; format: StlFormat; triangles: number; inspectionError: string | null } | null = null;
+let shown: { name: string; format: MeshFormat; triangles: number; inspectionError: string | null } | null = null;
 let pending: AbortController | null = null;
+/** Worker timings of the last load, ms (logged, never asserted). */
+let lastLoad: { name: string; triangles: number; parseMs: number; inspectMs: number } | null = null;
 
 // STL is unitless: mm unless the user said inches; the choice is kept for the next visit.
 let units: UnitChoice = loadUnits(storage);
+/** The unit the loaded file states (3MF); it overrides `units` for that part only. */
+let fileUnits: FileUnits | null = null;
+/** File units -> mm for the part on the bed. */
+const scaleNow = (): number => (fileUnits ? fileUnits.mmPerUnit : unitScaleOf(units));
+
+// The minimum-feature hint compares the thinnest slab with this end mill (mm), kept for the next visit.
+const toolInput = byId<HTMLInputElement>('tool-diameter');
+let toolMm = loadToolDiameter(storage);
+toolInput.value = String(toolMm);
+toolInput.addEventListener('input', () => {
+  const v = parseToolDiameter(toolInput.value);
+  toolInput.setAttribute('aria-invalid', String(v === null));
+  if (v === null) return;
+  toolMm = v;
+  saveToolDiameter(storage, v);
+  render();
+});
+
+// The outline (feature edges): on unless the user turns it off; skipped by the worker on a large mesh.
+const edgesToggle = byId<HTMLInputElement>('edges-toggle');
+const edgesNote = byId('edges-note');
+let edgesOn = true;
+edgesToggle.addEventListener('change', () => {
+  edgesOn = edgesToggle.checked;
+  renderEdges();
+});
+function renderEdges(): void {
+  const available = part?.featureEdges != null;
+  edgesToggle.disabled = !available;
+  edgesToggle.checked = available && edgesOn;
+  part?.setFeatureEdgesVisible(edgesOn);
+  const skipped = part !== null && shown !== null && !available && shown.triangles > FEATURE_EDGES_MAX_TRIANGLES;
+  edgesNote.textContent = skipped
+    ? `Outline off: over ${FEATURE_EDGES_MAX_TRIANGLES.toLocaleString('en-US')} triangles.`
+    : '';
+  viewport.requestRender();
+}
+const loadProgress = byId<HTMLProgressElement>('load-progress');
 
 const setStatus = (text: string, isError = false): void => panel.setStatus(text, isError);
 
@@ -137,6 +180,7 @@ const unitsBadgeEl = new UnitsBadge(
   byId<HTMLButtonElement>('units-toggle'),
   byId('units-hint'),
   () => {
+    if (fileUnits) return; // the file states its unit
     units = units === 'in' ? 'mm' : 'in';
     saveUnits(storage, units);
     render();
@@ -272,16 +316,22 @@ viewport.onAfterRender(placeMeasureLabel);
 
 /** Applies the units choice and the orientation to the mesh, the panel rows and the badge, then re-runs the fit. */
 function render(): void {
-  const scale = unitScaleOf(units);
+  const scale = scaleNow();
   part?.setUnitScale(scale);
-  unitsBadgeEl.show(unitsBadge(units, part ? unitHint(part.size, units, machineProfile.cuttingArea) : null));
+  unitsBadgeEl.show(
+    unitsBadge(units, part && !fileUnits ? unitHint(part.size, units, machineProfile.cuttingArea) : null, fileUnits),
+  );
   if (shown) {
     const stats = shownStats(scale);
     const rows: PanelRow[] = stats
       ? partRows({ name: shown.name, format: shown.format, stats }, EDGE_COLOURS)
       : uninspectedRows(shown.name, shown.format, shown.triangles, shown.inspectionError ?? 'unknown error');
+    const size = partSizeMm(scale);
+    const hint = size ? minFeatureHint(size, toolMm, formatNumber) : null;
+    if (hint) rows.push({ key: 'thinnest', label: 'Thinnest slab (hint)', value: hint.text, tone: hint.belowTool ? 'warn' : undefined });
     panel.show(rows);
   }
+  renderEdges();
   renderFit(scale);
   renderOrient(scale);
   renderMeasure();
@@ -388,11 +438,21 @@ async function open(file: File): Promise<void> {
   const controller = new AbortController();
   pending = controller;
   setStatus(`Reading ${file.name}…`);
+  showProgress(0);
   try {
     const stl = await loadStl(file, {
       signal: controller.signal,
-      onProgress: (done) => setStatus(`Reading ${file.name}… ${done.toLocaleString()} triangles`),
+      onProgress: (p) => {
+        if (pending !== controller) return;
+        setStatus(progressText(file.name, p));
+        showProgress(progressFraction(p));
+      },
     });
+    // The load time is logged, never asserted.
+    console.info(
+      `loaded ${stl.name}: ${stl.triangles.toLocaleString('en-US')} triangles, parsed in ${Math.round(stl.parseMs)} ms, inspected in ${Math.round(stl.inspectMs)} ms (worker)`,
+    );
+    lastLoad = { name: stl.name, triangles: stl.triangles, parseMs: stl.parseMs, inspectMs: stl.inspectMs };
     const next = buildPartMesh(stl.positions, stl.inspection ?? undefined);
     part?.dispose();
     part = next;
@@ -402,6 +462,7 @@ async function open(file: File): Promise<void> {
     measurePoints = []; // a measure belongs to the part it was taken on
     machine.scene.add(next.object);
     fileStats = stl.inspection?.stats ?? null;
+    fileUnits = stl.units;
     shown = { name: stl.name, format: stl.format, triangles: stl.triangles, inspectionError: stl.inspectionError ?? null };
     render();
     setStatus(`Loaded ${stl.name}.`);
@@ -410,8 +471,18 @@ async function open(file: File): Promise<void> {
     // A failed load keeps the previous part on the bed and says why.
     setStatus(e instanceof StlError ? e.message : `Could not load ${file.name}: ${String(e)}`, true);
   } finally {
-    if (pending === controller) pending = null;
+    if (pending === controller) {
+      pending = null;
+      showProgress(undefined);
+    }
   }
+}
+
+/** The load bar: a fraction, null for an unknown end, undefined to hide it. */
+function showProgress(fraction: number | null | undefined): void {
+  loadProgress.hidden = fraction === undefined;
+  if (fraction === null || fraction === undefined) loadProgress.removeAttribute('value');
+  else loadProgress.value = fraction;
 }
 
 // Profile: export and import as JSON; the setup sheet for CAM, copied as text.
@@ -503,10 +574,11 @@ profileFile.addEventListener('change', async () => {
 /** The setup sheet for the current part, stock and origin. */
 function currentSheet(): string {
   const form = readStockForm(stockPanel.read());
-  const scale = unitScaleOf(units);
+  const scale = scaleNow();
   return setupSheet({
     partName: shown?.name ?? null,
     units,
+    fileUnits,
     partSizeMm: partSizeMm(scale),
     rotation: part?.rotation ?? null,
     machine: { ...machineProfile, keepOut: form.ok ? form.keepOut : [] },
@@ -551,13 +623,21 @@ if (import.meta.env.DEV) {
     },
     /** The stats as shown, mm (after the units scale). */
     get stats() {
-      return fileStats ? scaleStats(fileStats, unitScaleOf(units)) : null;
+      return fileStats ? scaleStats(fileStats, scaleNow()) : null;
     },
     get fileStats() {
       return fileStats;
     },
     get units() {
       return units;
+    },
+    /** The unit the loaded file states (3MF), or null. */
+    get fileUnits() {
+      return fileUnits;
+    },
+    /** Worker timings of the last load, ms. */
+    get lastLoad() {
+      return lastLoad;
     },
     stockMesh,
     keepOutMesh,

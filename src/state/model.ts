@@ -60,6 +60,8 @@ export interface MeshInspection {
   readonly stats: MeshStats;
   readonly openEdgeSegments: Float32Array;
   readonly nonManifoldEdgeSegments: Float32Array;
+  /** The part's outline (faces meeting at more than 20°), same layout; null when skipped on a large mesh. */
+  readonly featureEdgeSegments: Float32Array | null;
 }
 
 /** Material left around the part on each side, mm: X and Y each side, above and below. */

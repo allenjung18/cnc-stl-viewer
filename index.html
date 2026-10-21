@@ -79,6 +79,11 @@
         background: rgba(20, 23, 27, 0.9); color: #ffd479; font: 600 12px system-ui, sans-serif; white-space: nowrap;
       }
       #measure-label[hidden] { display: none; }
+      #load-progress { display: block; width: 100%; margin: 8px 0 0; }
+      #load-progress[hidden] { display: none; }
+      #tool { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin: 8px 0 0; }
+      #tool input { width: 6em; }
+      #tool-diameter[aria-invalid='true'] { outline: 1px solid #ff8a80; }
       #load-status { margin: 8px 0 0; }
       #load-status:empty { display: none; }
       #load-status.error { color: #ff8a80; }
@@ -95,8 +100,8 @@
   <body>
     <div id="viewport"></div>
     <aside id="panel" aria-label="Part">
-      <button id="open-file" type="button">Open STL…</button>
-      <input id="file-input" type="file" accept=".stl,model/stl,application/sla" hidden />
+      <button id="open-file" type="button">Open STL or 3MF…</button>
+      <input id="file-input" type="file" accept=".stl,.3mf,model/stl,application/sla,model/3mf" hidden />
       <span> or drop a file anywhere</span>
       <div id="units" role="group" aria-label="Units">
         <span class="label">Units</span>
@@ -109,6 +114,10 @@
         <dt>Format</dt><dd><output id="part-format" data-testid="part-format">–</output></dd>
         <dt>Triangles</dt><dd><output id="part-triangles" data-testid="part-triangles">–</output></dd>
       </dl>
+      <div class="row" id="tool">
+        <label for="tool-diameter">End mill Ø (mm, for the thinnest-slab hint)</label>
+        <input id="tool-diameter" data-testid="tool-diameter" type="number" min="0.1" max="100" step="any" inputmode="decimal" />
+      </div>
       <section id="view" aria-label="View">
         <h2>View</h2>
         <div class="row" role="group" aria-label="Standard views">
@@ -121,6 +130,10 @@
           <button id="ortho-toggle" type="button" data-testid="ortho-toggle" aria-pressed="false">Orthographic <kbd>O</kbd></button>
           <button id="view-fit" type="button" data-testid="view-fit">Fit <kbd>F</kbd></button>
           <button id="measure-toggle" type="button" data-testid="measure-toggle" aria-pressed="false" disabled>Measure…</button>
+        </div>
+        <div class="row">
+          <label><input id="edges-toggle" data-testid="edges-toggle" type="checkbox" checked disabled /> Outline (edges over 20°)</label>
+          <span id="edges-note" data-testid="edges-note" class="note"></span>
         </div>
         <p id="measure-info" data-testid="measure-info" role="status"></p>
       </section>
@@ -203,10 +216,11 @@
         <textarea id="setup-sheet" data-testid="setup-sheet" readonly hidden aria-label="Setup sheet"></textarea>
         <p class="note">The machine, stock and origin are kept in this browser; export them to move to another PC.</p>
       </section>
+      <progress id="load-progress" data-testid="load-progress" max="1" hidden></progress>
       <p id="load-status" role="status" aria-live="polite"></p>
     </aside>
     <div id="measure-label" data-testid="measure-label" hidden></div>
-    <div id="drop-overlay" hidden>Drop the STL to load it</div>
+    <div id="drop-overlay" hidden>Drop the STL or 3MF to load it</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

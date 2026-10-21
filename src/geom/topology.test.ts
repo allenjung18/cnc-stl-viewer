@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { boxTriangles, reversed } from '../../test/fixtures/tiny-generator';
 import { bboxOf } from './bbox';
-import { analyseTopology, flippedHint, MIN_WELD_EPSILON, ShardedMap, weldEpsilon, weldVertices } from './topology';
+import { analyseTopology, flippedHint, MIN_WELD_EPSILON, normalCos, ShardedMap, weldEpsilon, weldVertices } from './topology';
 
 const soup = (tris: readonly (readonly (readonly number[])[])[]): Float32Array => Float32Array.from(tris.flat(2));
 const topo = (p: Float32Array) => {
@@ -131,5 +131,62 @@ describe('ShardedMap', () => {
 
   it('refuses a shard count that is not a positive integer', () => {
     for (const n of [0, -1, 1.5, Number.NaN]) expect(() => new ShardedMap(n)).toThrow(RangeError);
+  });
+});
+
+describe('analyseTopology: feature edges (the outline)', () => {
+  const flat = (tris: ReturnType<typeof boxTriangles>): Float32Array => Float32Array.from(tris.flat(2));
+  const run = (p: Float32Array, deg?: number) => {
+    const box = bboxOf(p);
+    return analyseTopology(p, box, weldEpsilon(box), deg === undefined ? {} : { featureAngleDeg: deg });
+  };
+  /** Two triangles sharing the edge (0,0,0)-(0,1,0) with `deg` between their half-planes (180 is flat). */
+  const fold = (deg: number): Float32Array => {
+    const r = (deg * Math.PI) / 180;
+    return Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, Math.cos(r), 0, Math.sin(r)]);
+  };
+
+  it('off unless asked: null, and the census is unchanged', () => {
+    const p = flat(boxTriangles([0, 0, 0], [20, 20, 20]));
+    const off = run(p);
+    const on = run(p, 20);
+    expect(off.featureEdgeSegments).toBeNull();
+    expect({ ...on, featureEdgeSegments: null }).toEqual(off);
+  });
+
+  it('a cube: its 12 edges, never the face diagonals', () => {
+    const t = run(flat(boxTriangles([0, 0, 0], [20, 20, 20])), 20);
+    expect(t.featureEdgeSegments!.length / 6).toBe(12);
+    // Every outline segment is a cube edge: its two ends differ along exactly one axis.
+    const s = t.featureEdgeSegments!;
+    for (let i = 0; i < s.length; i += 6) {
+      const moved = [0, 1, 2].filter((k) => s[i + k] !== s[i + 3 + k]).length;
+      expect(moved).toBe(1);
+    }
+  });
+
+  it('the angle is a strict threshold between the two normals', () => {
+    // Folded up by 30° from flat, the normals differ by 30°: sharp at 20, not at 40.
+    expect(run(fold(150), 20).featureEdgeSegments!.length).toBe(6);
+    expect(run(fold(150), 40).featureEdgeSegments!.length).toBe(0);
+    expect(run(fold(180), 20).featureEdgeSegments!.length).toBe(0); // coplanar
+    expect(run(fold(170), 20).featureEdgeSegments!.length).toBe(0); // 10° apart
+  });
+
+  it('open and non-manifold edges are not outline edges (they have their own overlays)', () => {
+    const open = run(flat(boxTriangles([0, 0, 0], [20, 20, 20]).slice(2)), 20); // no bottom
+    expect(open.openEdges).toBe(4);
+    expect(open.featureEdgeSegments!.length / 6).toBe(8); // the 4 rim edges are open, not outline
+    const bow = run(flat(boxTriangles([0, 0, 0], [10, 10, 10]).concat(boxTriangles([10, 10, 0], [10, 10, 10]))), 20);
+    expect(bow.nonManifoldEdges).toBe(1);
+    expect(bow.featureEdgeSegments!.length / 6).toBe(22);
+  });
+
+  it('a degenerate neighbour never makes an edge sharp', () => {
+    expect(normalCos(Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), 0, 1)).toBe(1);
+  });
+
+  it.each([0, 180, -5, Number.NaN, Infinity])('refuses a feature angle of %s', (deg) => {
+    expect(() => run(fold(150), deg)).toThrow(RangeError);
   });
 });

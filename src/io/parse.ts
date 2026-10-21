@@ -8,7 +8,8 @@
  */
 import { inspectMesh } from '../geom/stats';
 import type { MeshInspection } from '../state/model';
-import { StlError, sniffStl, type StlFormat } from './sniff';
+import { formatBytes, MAX_STL_BYTES, StlError, sniffStl, type MeshFormat, type StlFormat } from './sniff';
+import { isZip, parse3mf, type ThreeMfUnit } from './threemf';
 
 export interface ParsedStl {
   readonly format: StlFormat;
@@ -27,6 +28,35 @@ export function parseStl(data: ArrayBuffer | Uint8Array, onProgress?: ProgressFn
   const sniff = sniffStl(bytes);
   const positions = sniff.format === 'stl-bin' ? parseBinary(bytes, sniff.triangles, onProgress) : parseAscii(bytes, onProgress);
   return { format: sniff.format, triangles: positions.length / 9, positions };
+}
+
+/** The unit a file states (3MF does; STL never). */
+export interface FileUnits {
+  readonly unit: ThreeMfUnit;
+  /** The file's unit -> mm. */
+  readonly mmPerUnit: number;
+}
+
+export interface ParsedMesh {
+  readonly format: MeshFormat;
+  readonly triangles: number;
+  /** As for ParsedStl: file units, file axes (a 3MF's build transforms applied). */
+  readonly positions: Float32Array;
+  /** null for STL, which carries no units. */
+  readonly units: FileUnits | null;
+}
+
+/** STL or 3MF, told apart by the bytes (a 3MF is a ZIP), never by the file name. */
+export function parseMesh(data: ArrayBuffer | Uint8Array, onProgress?: ProgressFn): ParsedMesh {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  if (bytes.length > MAX_STL_BYTES) {
+    throw new StlError(`The file is ${formatBytes(bytes.length)}; files over ${formatBytes(MAX_STL_BYTES)} are refused.`);
+  }
+  if (isZip(bytes)) {
+    const m = parse3mf(bytes, onProgress);
+    return { format: '3mf', triangles: m.triangles, positions: m.positions, units: { unit: m.unit, mmPerUnit: m.mmPerUnit } };
+  }
+  return { ...parseStl(bytes, onProgress), units: null };
 }
 
 function parseBinary(bytes: Uint8Array, triangles: number, onProgress?: ProgressFn): Float32Array {
@@ -133,13 +163,25 @@ export interface ParseRequest {
 
 /** Worker -> main thread. `positions` and the edge segments on `done` are transferred, not copied. */
 export type ParseResponse =
-  | { readonly id: number; readonly type: 'progress'; readonly done: number; readonly total: number }
+  | {
+      readonly id: number;
+      readonly type: 'progress';
+      /** Reading the triangles, then checking the mesh (welding and the edge census). */
+      readonly phase: 'parse' | 'inspect';
+      readonly done: number;
+      /** -1 while unknown (an ASCII STL). */
+      readonly total: number;
+    }
   | {
       readonly id: number;
       readonly type: 'done';
-      readonly format: StlFormat;
+      readonly format: MeshFormat;
       readonly triangles: number;
       readonly positions: Float32Array;
+      readonly units: FileUnits | null;
+      /** Milliseconds spent reading the triangles and inspecting them, in the worker. */
+      readonly parseMs: number;
+      readonly inspectMs: number;
       /** null when the inspector failed; the part still loads and `inspectionError` says why. */
       readonly inspection: MeshInspection | null;
       readonly inspectionError?: string;
@@ -153,7 +195,10 @@ export function handleParseRequest(
   inspect: (positions: Float32Array) => MeshInspection = inspectMesh,
 ): void {
   try {
-    const parsed = parseStl(req.buffer, (done, total) => post({ id: req.id, type: 'progress', done, total }, []));
+    const t0 = performance.now();
+    const parsed = parseMesh(req.buffer, (done, total) => post({ id: req.id, type: 'progress', phase: 'parse', done, total }, []));
+    const t1 = performance.now();
+    post({ id: req.id, type: 'progress', phase: 'inspect', done: 0, total: parsed.triangles }, []);
     // The inspector runs here too, off the main thread: welding and the edge census are the slow part.
     // A file that parsed still loads when the inspector fails (out of memory on a huge mesh, say).
     let inspection: MeshInspection | null = null;
@@ -163,13 +208,22 @@ export function handleParseRequest(
     } catch (e) {
       inspectionError = e instanceof Error ? e.message : String(e);
     }
-    const base = { id: req.id, type: 'done', format: parsed.format, triangles: parsed.triangles, positions: parsed.positions } as const;
-    post(
-      inspection ? { ...base, inspection } : { ...base, inspection: null, inspectionError: inspectionError ?? 'unknown error' },
-      inspection
-        ? [parsed.positions.buffer, inspection.openEdgeSegments.buffer, inspection.nonManifoldEdgeSegments.buffer]
-        : [parsed.positions.buffer],
-    );
+    const base = {
+      id: req.id,
+      type: 'done',
+      format: parsed.format,
+      triangles: parsed.triangles,
+      positions: parsed.positions,
+      units: parsed.units,
+      parseMs: t1 - t0,
+      inspectMs: performance.now() - t1,
+    } as const;
+    const transfer: Transferable[] = [parsed.positions.buffer];
+    if (inspection) {
+      transfer.push(inspection.openEdgeSegments.buffer, inspection.nonManifoldEdgeSegments.buffer);
+      if (inspection.featureEdgeSegments) transfer.push(inspection.featureEdgeSegments.buffer);
+    }
+    post(inspection ? { ...base, inspection } : { ...base, inspection: null, inspectionError: inspectionError ?? 'unknown error' }, transfer);
   } catch (e) {
     const message = e instanceof StlError ? e.message : `The file could not be read: ${e instanceof Error ? e.message : String(e)}`;
     post({ id: req.id, type: 'error', message }, []);

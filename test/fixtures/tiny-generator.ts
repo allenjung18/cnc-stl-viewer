@@ -1,6 +1,6 @@
 /// <reference types="node" />
 /**
- * Writes the STL test fixtures in this folder. The files are committed; run
+ * Writes the STL and 3MF test fixtures in this folder. The files are committed; run
  * `npm run fixtures` (Node 22.18 or later: it runs this .ts file directly)
  * after changing anything here, and the parse tests check
  * that the committed bytes still match what this file builds.
@@ -10,6 +10,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { crc32, deflateRawSync } from 'node:zlib';
 
 export type Point = readonly [number, number, number];
 export type Triangle = readonly [Point, Point, Point];
@@ -95,6 +96,183 @@ export function asciiStl(tris: readonly Triangle[], name: string): Uint8Array {
 }
 
 /**
+ * A binary STL of an axis-aligned cube of edge `size` from `min`, each face cut
+ * into an n × n grid of two triangles per cell: 12·n² triangles, watertight,
+ * outward. Written straight into the bytes (no per-triangle objects), so a
+ * 100 MB file builds in well under a second. Used for the large-file tests,
+ * which write it at test time; it is never committed.
+ */
+export function gridCubeStl(n: number, size: number, min: Point = [0, 0, 0]): Uint8Array {
+  if (!(Number.isInteger(n) && n >= 1)) throw new RangeError(`grid must be a whole number >= 1, got ${n}`);
+  const triangles = 12 * n * n;
+  const bytes = new Uint8Array(84 + 50 * triangles);
+  const header = `binary grid cube ${n} x ${n} per face, ${triangles} triangles`;
+  for (let i = 0; i < header.length; i++) bytes[i] = header.charCodeAt(i) & 0x7f;
+  const view = new DataView(bytes.buffer);
+  view.setUint32(80, triangles, true);
+  let at = 84;
+  const put = (x: number, y: number, z: number): void => {
+    view.setFloat32(at, x, true);
+    view.setFloat32(at + 4, y, true);
+    view.setFloat32(at + 8, z, true);
+    at += 12;
+  };
+  const step = size / n;
+  // Each face: an origin corner, two in-face axes (u then v gives the outward normal), the normal.
+  const faces: [Point, Point, Point, Point][] = [];
+  const [x0, y0, z0] = min;
+  const s = size;
+  faces.push([[x0, y0, z0], [0, 1, 0], [1, 0, 0], [0, 0, -1]]); // bottom
+  faces.push([[x0, y0, z0 + s], [1, 0, 0], [0, 1, 0], [0, 0, 1]]); // top
+  faces.push([[x0, y0, z0], [1, 0, 0], [0, 0, 1], [0, -1, 0]]); // front
+  faces.push([[x0, y0 + s, z0], [0, 0, 1], [1, 0, 0], [0, 1, 0]]); // back
+  faces.push([[x0, y0, z0], [0, 0, 1], [0, 1, 0], [-1, 0, 0]]); // left
+  faces.push([[x0 + s, y0, z0], [0, 1, 0], [0, 0, 1], [1, 0, 0]]); // right
+  for (const [o, u, v, nrm] of faces) {
+    const p = (i: number, j: number): Point => [
+      o[0] + step * (i * u[0] + j * v[0]),
+      o[1] + step * (i * u[1] + j * v[1]),
+      o[2] + step * (i * u[2] + j * v[2]),
+    ];
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const a = p(i, j), b = p(i + 1, j), c = p(i + 1, j + 1), d = p(i, j + 1);
+        for (const tri of [[a, b, c], [a, c, d]] as const) {
+          put(nrm[0], nrm[1], nrm[2]);
+          for (const q of tri) put(q[0], q[1], q[2]);
+          at += 2;
+        }
+      }
+    }
+  }
+  return bytes;
+}
+
+/** One file in a ZIP: its name, its bytes, and whether to deflate it. */
+export interface ZipEntry {
+  readonly name: string;
+  readonly data: Uint8Array;
+  readonly deflate?: boolean | undefined;
+}
+
+/** A ZIP package (no timestamps, so the bytes depend only on the entries). */
+export function zip(entries: readonly ZipEntry[]): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  const central: Uint8Array[] = [];
+  let offset = 0;
+  for (const e of entries) {
+    const name = new TextEncoder().encode(e.name);
+    const body = e.deflate ? new Uint8Array(deflateRawSync(e.data)) : e.data;
+    const crc = crc32(e.data);
+    const local = new Uint8Array(30 + name.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(8, e.deflate ? 8 : 0, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, body.length, true);
+    lv.setUint32(22, e.data.length, true);
+    lv.setUint16(26, name.length, true);
+    local.set(name, 30);
+    const dir = new Uint8Array(46 + name.length);
+    const dv = new DataView(dir.buffer);
+    dv.setUint32(0, 0x02014b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 20, true);
+    dv.setUint16(10, e.deflate ? 8 : 0, true);
+    dv.setUint32(16, crc, true);
+    dv.setUint32(20, body.length, true);
+    dv.setUint32(24, e.data.length, true);
+    dv.setUint16(28, name.length, true);
+    dv.setUint32(42, offset, true);
+    dir.set(name, 46);
+    chunks.push(local, body);
+    central.push(dir);
+    offset += local.length + body.length;
+  }
+  const dirSize = central.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, dirSize, true);
+  ev.setUint32(16, offset, true);
+  const out = new Uint8Array(offset + dirSize + 22);
+  let at = 0;
+  for (const c of [...chunks, ...central, end]) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+}
+
+/** An indexed mesh: shared vertices, triangles as vertex indices (what a 3MF stores). */
+export interface IndexedMesh {
+  readonly vertices: readonly Point[];
+  readonly triangles: readonly (readonly [number, number, number])[];
+}
+
+/** Indexes a triangle soup by exact coordinates, keeping the triangles' order and winding. */
+export function indexed(tris: readonly Triangle[]): IndexedMesh {
+  const vertices: Point[] = [];
+  const seen = new Map<string, number>();
+  const at = (p: Point): number => {
+    const key = p.join(',');
+    let i = seen.get(key);
+    if (i === undefined) {
+      i = vertices.length;
+      vertices.push(p);
+      seen.set(key, i);
+    }
+    return i;
+  };
+  return { vertices, triangles: tris.map(([a, b, c]) => [at(a), at(b), at(c)] as const) };
+}
+
+/** The XML of a 3MF mesh object. */
+export function meshObjectXml(id: number, mesh: IndexedMesh, type = 'model'): string {
+  const v = mesh.vertices.map((p) => `      <vertex x="${p[0]}" y="${p[1]}" z="${p[2]}" />`).join('\n');
+  const t = mesh.triangles.map(([a, b, c]) => `      <triangle v1="${a}" v2="${b}" v3="${c}" />`).join('\n');
+  return `   <object id="${id}" type="${type}">\n    <mesh>\n     <vertices>\n${v}\n     </vertices>\n     <triangles>\n${t}\n     </triangles>\n    </mesh>\n   </object>`;
+}
+
+/** A 3MF model part: `<model unit>` with the given objects and build items. */
+export function modelXml(unit: string | null, objects: readonly string[], items: readonly string[]): string {
+  const unitAttr = unit === null ? '' : ` unit="${unit}"`;
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<model${unitAttr} xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">`,
+    '  <resources>',
+    ...objects,
+    '  </resources>',
+    '  <build>',
+    ...items.map((i) => `    ${i}`),
+    '  </build>',
+    '</model>',
+    '',
+  ].join('\n');
+}
+
+/** A whole 3MF package around one model part (at `3D/3dmodel.model` unless named). */
+export function threeMf(model: string, options: { deflate?: boolean; modelPath?: string } = {}): Uint8Array {
+  const path = options.modelPath ?? '3D/3dmodel.model';
+  const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
+  const types =
+    '<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />' +
+    '<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" /></Types>\n';
+  const rels =
+    '<?xml version="1.0" encoding="UTF-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    `<Relationship Target="/${path}" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" /></Relationships>\n`;
+  return zip([
+    { name: '[Content_Types].xml', data: enc(types), deflate: options.deflate },
+    { name: '_rels/.rels', data: enc(rels), deflate: options.deflate },
+    { name: path, data: enc(model), deflate: options.deflate },
+  ]);
+}
+
+/**
  * The cube is placed off the origin in file space on purpose: the viewer must
  * move its min corner to the origin, so a test can tell "placed" from "as read".
  */
@@ -120,6 +298,10 @@ export function buildFixtures(): Record<string, Uint8Array> {
     'cube-reversed-winding.stl': binaryStl(reversed(cube), 'binary 20 mm cube, every triangle wound inward'),
     // Too tall for the cutting area as read (80 + 3 mm of allowance > 76); fits lying down.
     'box-10x20x80.stl': binaryStl(boxTriangles(TALL_BOX_MIN, TALL_BOX_SIZE), 'binary box 10 x 20 x 80, off the origin'),
+    // The same 20 mm cube as a 3MF that states millimetres; stored, not deflated, so the bytes never depend on zlib.
+    'cube-20mm.3mf': threeMf(modelXml('millimeter', [meshObjectXml(1, indexed(cube))], ['<item objectid="1" />'])),
+    // A 1 x 1 x 1 cube in a 3MF that states inches: it must read as 25.4 mm with no toggle.
+    'cube-1in.3mf': threeMf(modelXml('inch', [meshObjectXml(1, indexed(boxTriangles([0, 0, 0], [1, 1, 1])))], ['<item objectid="1" />'])),
   };
 }
 

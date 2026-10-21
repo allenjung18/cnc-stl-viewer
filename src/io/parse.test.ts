@@ -116,16 +116,27 @@ describe('handleParseRequest (the worker body)', () => {
     const bytes = fixture('cube-20mm-ascii.stl');
     const posted: [ParseResponse, Transferable[]][] = [];
     handleParseRequest({ id: 7, buffer: bytes.slice().buffer }, (m, t) => posted.push([m, t]));
-    expect(posted).toHaveLength(1);
-    const [msg, transfer] = posted[0]!;
+    // One progress message as the inspector starts (the cube is far below the per-250k parse progress), then done.
+    expect(posted).toHaveLength(2);
+    expect(posted[0]).toEqual([{ id: 7, type: 'progress', phase: 'inspect', done: 0, total: 12 }, []]);
+    const [msg, transfer] = posted[1]!;
     if (msg.type !== 'done') throw new Error(`expected done, got ${msg.type}`);
     expect(msg.id).toBe(7);
     expect(msg.triangles).toBe(12);
+    expect(msg.units).toBeNull(); // an STL states no unit
+    expect(msg.parseMs).toBeGreaterThanOrEqual(0);
+    expect(msg.inspectMs).toBeGreaterThanOrEqual(0);
     const inspection = msg.inspection!;
     expect(inspection.stats.vertices).toBe(8);
     expect(inspection.stats.watertight).toBe(true);
-    expect(transfer).toEqual([msg.positions.buffer, inspection.openEdgeSegments.buffer, inspection.nonManifoldEdgeSegments.buffer]);
-    expect(new Set(transfer).size).toBe(3); // a buffer listed twice would make postMessage throw
+    expect(inspection.featureEdgeSegments!.length).toBe(12 * 6); // the cube's 12 edges, not its face diagonals
+    expect(transfer).toEqual([
+      msg.positions.buffer,
+      inspection.openEdgeSegments.buffer,
+      inspection.nonManifoldEdgeSegments.buffer,
+      inspection.featureEdgeSegments!.buffer,
+    ]);
+    expect(new Set(transfer).size).toBe(4); // a buffer listed twice would make postMessage throw
   });
 
   it('a failing inspector still posts the parsed part, with the reason and no inspection', () => {
@@ -134,8 +145,8 @@ describe('handleParseRequest (the worker body)', () => {
     handleParseRequest({ id: 3, buffer: bytes.slice().buffer }, (m, t) => posted.push([m, t]), () => {
       throw new RangeError('Map maximum size exceeded');
     });
-    expect(posted).toHaveLength(1);
-    const [msg, transfer] = posted[0]!;
+    expect(posted).toHaveLength(2);
+    const [msg, transfer] = posted[1]!;
     if (msg.type !== 'done') throw new Error(`expected done, got ${msg.type}`);
     expect(msg.triangles).toBe(12);
     expect(msg.inspection).toBeNull();

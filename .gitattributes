@@ -1,2 +1,3 @@
-# STL fixtures are compared byte for byte; never convert line endings.
+# STL and 3MF fixtures are compared byte for byte; never convert line endings.
 *.stl binary
+*.3mf binary

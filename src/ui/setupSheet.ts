@@ -6,6 +6,7 @@
 import { formatMm, type FitReport } from '../geom/fit';
 import { isAxisAligned, type Mat3 } from '../geom/orient';
 import type { UnitChoice } from '../geom/units';
+import type { FileUnits } from '../io/parse';
 import type { MachineProfile, Setup, Stock, Vec3 } from '../state/model';
 import { formatNumber } from './panel';
 import { fitVerdict } from './stockPanel';
@@ -13,6 +14,8 @@ import { fitVerdict } from './stockPanel';
 export interface SetupSheetInput {
   readonly partName: string | null;
   readonly units: UnitChoice;
+  /** The unit the file states (3MF); it wins over `units`. */
+  readonly fileUnits?: FileUnits | null;
   /** The part's size as shown, mm (oriented, scaled); null with no part. */
   readonly partSizeMm: Vec3 | null;
   readonly rotation: Mat3 | null;
@@ -52,7 +55,11 @@ export function setupSheet(i: SetupSheetInput): string {
   lines.push(`Machine: ${i.machine.name} (cutting area ${mm(i.machine.cuttingArea)})`);
   if (i.partName && i.partSizeMm) {
     lines.push(`Part: ${i.partName}`);
-    lines.push(`Units: ${i.units === 'in' ? 'file read as inches (×25.4)' : 'file read as mm'}`);
+    lines.push(
+      i.fileUnits
+        ? `Units: ${i.fileUnits.unit}, stated by the file${i.fileUnits.mmPerUnit === 1 ? '' : ` (×${i.fileUnits.mmPerUnit} to mm)`}`
+        : `Units: ${i.units === 'in' ? 'file read as inches (×25.4)' : 'file read as mm'}`,
+    );
     lines.push(`Part X × Y × Z: ${mm(i.partSizeMm)}`);
     if (i.rotation) lines.push(`Orientation: ${orientationText(i.rotation)}`);
   } else {

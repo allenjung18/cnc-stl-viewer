@@ -122,6 +122,7 @@ describe('unitsBadge', () => {
       toggleLabel: 'Treat as inches (×25.4)',
       hint: 'looks like inches',
       hintTone: 'warn',
+      locked: false,
     });
   });
 
@@ -135,7 +136,22 @@ describe('unitsBadge', () => {
       toggleLabel: 'Treat as mm',
       hint: null,
       hintTone: undefined,
+      locked: false,
     });
+  });
+
+  it('a file that states its unit (3MF): says so, no hint, the toggle locked whatever the STL choice', () => {
+    for (const choice of ['mm', 'in'] as const) {
+      expect(unitsBadge(choice, { kind: 'looks-like-inches', text: 'looks like inches' }, { unit: 'millimeter', mmPerUnit: 1 })).toEqual({
+        value: 'mm (from the file)',
+        toggleLabel: 'Set by the file',
+        hint: null,
+        hintTone: undefined,
+        locked: true,
+      });
+    }
+    expect(unitsBadge('mm', null, { unit: 'inch', mmPerUnit: 25.4 }).value).toBe('inch (from the file, ×25.4 to mm)');
+    expect(unitsBadge('mm', null, null).locked).toBe(false);
   });
 
   it('the inch cube after ×25.4: rows read 25.4 mm and 16,387.064 mm³', () => {

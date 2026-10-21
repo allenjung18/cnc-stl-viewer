@@ -33,14 +33,35 @@ export function surfaceArea(p: ArrayLike<number>): number {
   return area;
 }
 
-/** Everything the panel shows about a mesh, plus the problem edges to draw. */
-export function inspectMesh(positions: ArrayLike<number>): MeshInspection {
+/** Faces meeting at more than this many degrees draw a feature edge (plan: Rendering, 20° threshold). */
+export const FEATURE_ANGLE_DEG = 20;
+/**
+ * Above this many triangles the feature-edge overlay is skipped (plan: Workers
+ * and large files, "~2 M"): a scanned or sculpted mesh has an edge almost
+ * everywhere, the overlay would double the draw and the worker's memory, and a
+ * 100 MB STL (2.1 M triangles) is past it.
+ */
+export const FEATURE_EDGES_MAX_TRIANGLES = 2_000_000;
+
+/** Whether a mesh of this many triangles gets an outline by default. */
+export function outlineByDefault(triangles: number): boolean {
+  return triangles <= FEATURE_EDGES_MAX_TRIANGLES;
+}
+
+export interface InspectOptions {
+  /** Collect the feature edges; by default only up to FEATURE_EDGES_MAX_TRIANGLES. */
+  readonly featureEdges?: boolean;
+}
+
+/** Everything the panel shows about a mesh, plus the problem edges to draw (and the feature edges, below the cut-off). */
+export function inspectMesh(positions: ArrayLike<number>, options: InspectOptions = {}): MeshInspection {
   if (positions.length === 0 || positions.length % 9 !== 0) {
     throw new RangeError(`positions must hold whole triangles (9 numbers each), got ${positions.length}`);
   }
   const bbox = bboxOf(positions);
   const eps = weldEpsilon(bbox);
-  const topo = analyseTopology(positions, bbox, eps);
+  const wantEdges = options.featureEdges ?? outlineByDefault(positions.length / 9);
+  const topo = analyseTopology(positions, bbox, eps, wantEdges ? { featureAngleDeg: FEATURE_ANGLE_DEG } : {});
   const volume = signedVolume(positions, centreOf(bbox));
   return {
     stats: {
@@ -59,5 +80,6 @@ export function inspectMesh(positions: ArrayLike<number>): MeshInspection {
     },
     openEdgeSegments: topo.openEdgeSegments,
     nonManifoldEdgeSegments: topo.nonManifoldEdgeSegments,
+    featureEdgeSegments: topo.featureEdgeSegments,
   };
 }

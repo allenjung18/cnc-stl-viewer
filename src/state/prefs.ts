@@ -3,6 +3,7 @@
  * is guarded: storage can be missing, blocked or full, and the viewer then
  * runs on its defaults. Never the mesh.
  */
+import { DEFAULT_TOOL_DIAMETER_MM, parseToolDiameter } from '../geom/features';
 import { parseUnitChoice, type UnitChoice } from '../geom/units';
 
 /** The subset of `Storage` the preferences use. */
@@ -33,6 +34,28 @@ export function saveUnits(storage: PrefStorage | null, choice: UnitChoice): bool
   if (!storage) return false;
   try {
     storage.setItem(UNITS_KEY, choice);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const TOOL_KEY = 'cnc-stl-viewer.tool-diameter';
+
+/** The stored end-mill diameter for the minimum-feature hint, mm; the 1/8 in default when nothing valid is stored. */
+export function loadToolDiameter(storage: PrefStorage | null): number {
+  try {
+    return parseToolDiameter(storage?.getItem(TOOL_KEY) ?? null) ?? DEFAULT_TOOL_DIAMETER_MM;
+  } catch {
+    return DEFAULT_TOOL_DIAMETER_MM;
+  }
+}
+
+/** Stores the end-mill diameter; returns false when it is invalid or could not be stored. */
+export function saveToolDiameter(storage: PrefStorage | null, mm: number): boolean {
+  if (!storage || parseToolDiameter(mm) === null) return false;
+  try {
+    storage.setItem(TOOL_KEY, String(mm));
     return true;
   } catch {
     return false;

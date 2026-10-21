@@ -7,8 +7,15 @@
  */
 
 export type StlFormat = 'stl-bin' | 'stl-ascii';
+/** Every format the viewer reads: the two STL forms and 3MF. */
+export type MeshFormat = StlFormat | '3mf';
 
-/** Larger files are refused before they are read (plan: Workers and large files). */
+/** How the panel names a format. */
+export function formatName(format: MeshFormat): string {
+  return format === 'stl-bin' ? 'binary STL' : format === 'stl-ascii' ? 'ASCII STL' : '3MF';
+}
+
+/** Larger files (STL or 3MF) are refused before they are read (plan: Workers and large files). */
 export const MAX_STL_BYTES = 500 * 1024 * 1024;
 
 const HEADER_BYTES = 80;

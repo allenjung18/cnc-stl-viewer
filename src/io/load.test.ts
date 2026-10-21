@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { loadStl, type FileLike, type ParseWorker } from './load';
+import { loadStl, progressFraction, progressText, type FileLike, type LoadProgress, type ParseWorker } from './load';
 import { handleParseRequest, type ParseRequest, type ParseResponse } from './parse';
 import { MAX_STL_BYTES, StlError } from './sniff';
 
@@ -90,5 +90,38 @@ describe('loadStl', () => {
     await Promise.resolve();
     controller.abort();
     await expect(load).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('loadStl: 3MF, progress, the size limit for every format', () => {
+  it('loads the 3MF cube with the unit it states and the timings, and reports each phase in order', async () => {
+    const seen: LoadProgress[] = [];
+    const m = await loadStl(fileOf('cube.3mf', fixture('cube-1in.3mf')), { createWorker: () => new FakeWorker(), onProgress: (p) => seen.push(p) });
+    expect(m).toMatchObject({ format: '3mf', triangles: 12, units: { unit: 'inch', mmPerUnit: 25.4 } });
+    expect(m.parseMs).toBeGreaterThanOrEqual(0);
+    expect(m.inspectMs).toBeGreaterThanOrEqual(0);
+    expect(seen.map((p) => p.phase)).toEqual(['read', 'inspect']);
+    const stl = await loadStl(fileOf('cube.stl', fixture('cube-20mm-binary.stl')), { createWorker: () => new FakeWorker() });
+    expect(stl.units).toBeNull();
+  });
+
+  it('refuses a 3MF over 500 MB by name, before reading it', async () => {
+    let read = 0;
+    const big: FileLike = { name: 'big.3mf', size: 600 * 1024 * 1024, arrayBuffer: async () => (read++, new ArrayBuffer(0)) };
+    await expect(loadStl(big, { createWorker: () => new FakeWorker() })).rejects.toThrow(/^big\.3mf is 600\.0 MB; files over 500\.0 MB are refused\.$/);
+    expect(read).toBe(0);
+  });
+
+  it('progressText and progressFraction for each phase', () => {
+    expect(progressText('a.stl', { phase: 'read', done: 0, total: 100 })).toBe('Reading a.stl…');
+    expect(progressText('a.stl', { phase: 'parse', done: 500_000, total: 2_000_000 })).toBe('Reading a.stl… 500,000 of 2,000,000 triangles (25%)');
+    expect(progressText('a.stl', { phase: 'parse', done: 250_000, total: -1 })).toBe('Reading a.stl… 250,000 triangles');
+    expect(progressText('a.stl', { phase: 'inspect', done: 0, total: 2_000_000 })).toBe('Checking the mesh of a.stl (2,000,000 triangles)…');
+    expect(progressFraction({ phase: 'read', done: 0, total: 9 })).toBe(0);
+    expect(progressFraction({ phase: 'parse', done: 1, total: 4 })).toBe(0.25);
+    expect(progressFraction({ phase: 'parse', done: 9, total: 4 })).toBe(1);
+    expect(progressFraction({ phase: 'parse', done: 9, total: -1 })).toBeNull();
+    expect(progressFraction({ phase: 'parse', done: 0, total: 0 })).toBeNull();
+    expect(progressFraction({ phase: 'inspect', done: 0, total: 4 })).toBeNull();
   });
 });

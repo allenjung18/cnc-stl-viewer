@@ -20,6 +20,7 @@
     "fixtures": "node test/fixtures/tiny-generator.ts"
   },
   "dependencies": {
+    "fflate": "0.8.3",
     "three": "0.186.1"
   },
   "devDependencies": {

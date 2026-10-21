@@ -73,6 +73,16 @@ export interface Topology {
   readonly openEdgeSegments: Float32Array;
   /** Non-manifold edges, same layout. */
   readonly nonManifoldEdgeSegments: Float32Array;
+  /** Manifold edges whose faces meet at more than the feature angle, same layout; null when not asked for. */
+  readonly featureEdgeSegments: Float32Array | null;
+}
+
+export interface TopologyOptions {
+  /**
+   * Also collect the feature edges: manifold edges whose two faces' normals
+   * differ by more than this many degrees (a CAD part's outline). Off when unset.
+   */
+  readonly featureAngleDeg?: number;
 }
 
 /**
@@ -81,20 +91,42 @@ export interface Topology {
  * is below eps² but whose corners stay distinct is counted degenerate and its
  * edges still count, since its neighbours share them.
  */
-export function analyseTopology(positions: ArrayLike<number>, box: BBox, eps: number): Topology {
+export function analyseTopology(
+  positions: ArrayLike<number>,
+  box: BBox,
+  eps: number,
+  options: TopologyOptions = {},
+): Topology {
   if (positions.length === 0 || positions.length % 9 !== 0) {
     throw new RangeError(`positions must hold whole triangles (9 numbers each), got ${positions.length}`);
   }
+  const featureAngle = options.featureAngleDeg;
+  if (featureAngle !== undefined && !(featureAngle > 0 && featureAngle < 180)) {
+    throw new RangeError(`feature angle must be above 0 and below 180 degrees, got ${featureAngle}`);
+  }
+  const cosLimit = featureAngle === undefined ? NaN : Math.cos((featureAngle * Math.PI) / 180);
   const welded = weldVertices(positions, box, eps);
   const { index, vertices: wv, count: nv } = welded;
+  // Per edge: uses in the low 2 bits (capped at 3), a sharp flag in bit 2, and the first triangle above them.
   const edges = new ShardedMap();
+  let tri = 0;
   const addEdge = (a: number, b: number): void => {
     const key = a < b ? a * nv + b : b * nv + a;
-    edges.set(key, (edges.get(key) ?? 0) + 1);
+    const prev = edges.get(key);
+    if (prev === undefined) {
+      edges.set(key, tri * 8 + 1);
+      return;
+    }
+    const uses = prev & 3;
+    let sharp = prev & 4;
+    const first = Math.floor(prev / 8);
+    if (uses === 1 && featureAngle !== undefined && normalCos(positions, first, tri) < cosLimit) sharp = 4;
+    edges.set(key, first * 8 + sharp + Math.min(uses + 1, 3));
   };
   const minArea = eps * eps;
   let degenerate = 0;
   for (let t = 0; t < index.length; t += 3) {
+    tri = t / 3;
     const a = index[t]!, b = index[t + 1]!, c = index[t + 2]!;
     if (a === b || b === c || a === c) {
       degenerate++;
@@ -108,11 +140,15 @@ export function analyseTopology(positions: ArrayLike<number>, box: BBox, eps: nu
 
   const open: number[] = [];
   const nonManifold: number[] = [];
-  for (const [key, uses] of edges.entries()) {
-    if (uses === 2) continue;
+  const feature: number[] = [];
+  for (const [key, value] of edges.entries()) {
+    const uses = value & 3;
+    // A feature edge is a manifold edge whose two faces meet at more than the angle; open and non-manifold edges have their own overlays.
+    const out = uses === 1 ? open : uses === 3 ? nonManifold : featureAngle !== undefined && value & 4 ? feature : null;
+    if (!out) continue;
     const a = Math.floor(key / nv);
     const b = key - a * nv;
-    (uses === 1 ? open : nonManifold).push(
+    out.push(
       wv[3 * a]!, wv[3 * a + 1]!, wv[3 * a + 2]!,
       wv[3 * b]!, wv[3 * b + 1]!, wv[3 * b + 2]!,
     );
@@ -128,7 +164,26 @@ export function analyseTopology(positions: ArrayLike<number>, box: BBox, eps: nu
     degenerateTris: degenerate,
     openEdgeSegments: Float32Array.from(open),
     nonManifoldEdgeSegments: Float32Array.from(nonManifold),
+    featureEdgeSegments: featureAngle === undefined ? null : Float32Array.from(feature),
   };
+}
+
+/**
+ * Cosine of the angle between the normals of triangles `t` and `u`, from their
+ * winding; 1 (never sharp) when either is degenerate.
+ */
+export function normalCos(p: ArrayLike<number>, t: number, u: number): number {
+  const n = triangleCross(p, 9 * t);
+  const m = triangleCross(p, 9 * u);
+  const len = Math.hypot(n[0], n[1], n[2]) * Math.hypot(m[0], m[1], m[2]);
+  if (!(len > 0) || !Number.isFinite(len)) return 1;
+  return (n[0] * m[0] + n[1] * m[1] + n[2] * m[2]) / len;
+}
+
+function triangleCross(p: ArrayLike<number>, at: number): [number, number, number] {
+  const ux = p[at + 3]! - p[at]!, uy = p[at + 4]! - p[at + 1]!, uz = p[at + 5]! - p[at + 2]!;
+  const vx = p[at + 6]! - p[at]!, vy = p[at + 7]! - p[at + 1]!, vz = p[at + 8]! - p[at + 2]!;
+  return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
 }
 
 /** Area of the triangle whose first coordinate is at `at`. */

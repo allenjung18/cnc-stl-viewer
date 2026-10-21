@@ -1,12 +1,12 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
-import { Box3, Group, Raycaster, Vector3, type LineBasicMaterial } from 'three';
+import { Box3, Group, Raycaster, Vector3, type LineBasicMaterial, type MeshStandardMaterial } from 'three';
 import { describe, expect, it } from 'vitest';
 import { boxTriangles, CUBE_MIN, reversed } from '../../test/fixtures/tiny-generator';
 import { IDENTITY, layFlat, rotate90 } from '../geom/orient';
 import { inspectMesh } from '../geom/stats';
 import { parseStl } from '../io/parse';
-import { buildPartMesh, NON_MANIFOLD_EDGE_COLOR, OPEN_EDGE_COLOR } from './partMesh';
+import { buildPartMesh, FEATURE_EDGE_COLOR, NON_MANIFOLD_EDGE_COLOR, OPEN_EDGE_COLOR } from './partMesh';
 
 const positionsOf = (name: string): Float32Array =>
   parseStl(new Uint8Array(readFileSync(new URL(`../../test/fixtures/${name}`, import.meta.url)))).positions;
@@ -137,13 +137,50 @@ describe('buildPartMesh', () => {
     expect((tie.nonManifoldEdges!.material as LineBasicMaterial).color.getHex()).toBe(NON_MANIFOLD_EDGE_COLOR);
   });
 
-  it('draws no overlay for a watertight cube or when no inspection is given', () => {
+  it('draws no problem overlay for a watertight cube or when no inspection is given', () => {
     const cube = positionsOf('cube-20mm-binary.stl');
-    for (const part of [buildPartMesh(cube, inspectMesh(cube)), buildPartMesh(cube)]) {
+    const inspected = buildPartMesh(cube, inspectMesh(cube));
+    const bare = buildPartMesh(cube);
+    for (const part of [inspected, bare]) {
       expect(part.openEdges).toBeNull();
       expect(part.nonManifoldEdges).toBeNull();
-      expect(part.object.children).toHaveLength(0);
     }
+    // The inspected cube draws only its outline; without an inspection nothing at all.
+    expect(inspected.object.children.map((c) => c.name)).toEqual(['feature-edges']);
+    expect(bare.object.children).toHaveLength(0);
+    expect(bare.featureEdges).toBeNull();
+  });
+
+  it('draws the outline: the 12 cube edges, depth-tested, under the problem edges, and hides it on request', () => {
+    const cube = positionsOf('cube-20mm-binary.stl');
+    const part = buildPartMesh(cube, inspectMesh(cube));
+    const lines = part.featureEdges!;
+    expect(lines.geometry.getAttribute('position').count).toBe(24);
+    const mat = lines.material as LineBasicMaterial;
+    expect(mat.color.getHex()).toBe(FEATURE_EDGE_COLOR);
+    expect(mat.depthTest).toBe(true);
+    expect((part.object.material as MeshStandardMaterial).polygonOffset).toBe(true);
+    part.setFeatureEdgesVisible(false);
+    expect(lines.visible).toBe(false);
+    part.setFeatureEdgesVisible(true);
+    expect(lines.visible).toBe(true);
+    // A mesh over the cut-off comes with no outline, and hiding it is a no-op.
+    const skipped = buildPartMesh(cube, inspectMesh(cube, { featureEdges: false }));
+    expect(skipped.featureEdges).toBeNull();
+    expect(() => skipped.setFeatureEdgesVisible(false)).not.toThrow();
+  });
+
+  it('dispose frees every geometry and material it made, outline and problem edges included', () => {
+    const bow = positionsOf('bowtie.stl');
+    const part = buildPartMesh(bow, inspectMesh(bow));
+    const owned = [part.object, part.featureEdges!, part.nonManifoldEdges!];
+    let disposed = 0;
+    for (const o of owned) {
+      o.geometry.addEventListener('dispose', () => disposed++);
+      (o.material as LineBasicMaterial).addEventListener('dispose', () => disposed++);
+    }
+    part.dispose();
+    expect(disposed).toBe(2 * owned.length);
   });
 
   it('refuses a segment array that is not whole segments', () => {

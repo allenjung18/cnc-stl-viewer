@@ -1,6 +1,6 @@
 /**
  * Whole-window drag-and-drop, plus a file-picker fallback. Hands the first file
- * on; whether it is an STL is for the sniffer to say, not the file name.
+ * on; whether it is an STL or a 3MF is for the sniffer to say, not the file name.
  */
 
 export interface DropzoneOptions {
@@ -54,7 +54,7 @@ export function installDropzone(options: DropzoneOptions): () => void {
     show(false);
     const file = event.dataTransfer?.files[0];
     if (file) onFile(file);
-    else onReject('Drop an STL file to load it.');
+    else onReject('Drop an STL or 3MF file to load it.');
   };
   const onPick = (): void => {
     const file = input.files?.[0];
