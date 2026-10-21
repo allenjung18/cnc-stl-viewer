@@ -302,6 +302,12 @@ export interface OrientCandidate {
   readonly size: Vec3;
   /** Area of the triangles lying on the bed (at the lowest Z), file units². */
   readonly contactArea: number;
+  /**
+   * Lengths closer than this are the same, file units: float32 positions are
+   * rounded to about 6e-8 of their largest coordinate, so this is 1e-6 of the
+   * larger of that coordinate and the part's size.
+   */
+  readonly tolerance: number;
 }
 
 /** Area of the triangles whose three corners all sit at the lowest Z once rotated by `r`. */
@@ -346,7 +352,7 @@ export function orientCandidates(positions: ArrayLike<number>, { regions = 6, an
     const rotation = alignToDown(region.normal);
     if (!rotations.some((c) => sameRotation(c.rotation, rotation, 1e-9))) rotations.push({ rotation, source: 'face' });
   }
-  const diag = Math.max(1, ...sizeOf(fileBBox).map(Math.abs));
+  const tolerance = 1e-6 * Math.max(1, ...sizeOf(fileBBox).map(Math.abs), ...fileBBox.min.map(Math.abs), ...fileBBox.max.map(Math.abs));
   return rotations.map(({ rotation, source }) => {
     const bbox = orientedBBox(positions, rotation, fileBBox);
     return {
@@ -354,7 +360,8 @@ export function orientCandidates(positions: ArrayLike<number>, { regions = 6, an
       source,
       bbox,
       size: sizeOf(bbox),
-      contactArea: contactArea(positions, areas, rotation, bbox.min[2], 1e-6 * diag),
+      contactArea: contactArea(positions, areas, rotation, bbox.min[2], tolerance),
+      tolerance,
     };
   });
 }
@@ -378,8 +385,11 @@ export interface RankOptions {
   readonly top?: number | undefined;
 }
 
-const differs = (a: number, b: number): boolean => Math.abs(a - b) > 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
-const sig = (n: number): string => n.toPrecision(9);
+/** Lengths in mm differ by more than the candidates' noise. */
+const lengthsDiffer = (a: number, b: number, tolMm: number): boolean => Math.abs(a - b) > tolMm;
+/** Areas in mm² differ by more than float noise: relative, plus the length noise along a side of the area. */
+const areasDiffer = (a: number, b: number, tolMm: number): boolean =>
+  Math.abs(a - b) > 1e-6 * Math.max(1, Math.abs(a), Math.abs(b)) + 4 * tolMm * Math.sqrt(Math.max(Math.abs(a), Math.abs(b)));
 
 /**
  * Orders the candidates (1) fits first, (2) lowest Z height, (3) most flat area
@@ -406,27 +416,39 @@ export function rankOrientations(candidates: readonly OrientCandidate[], { scale
       fit,
       fits: fit?.fits ?? false,
     };
-    return { ranked, index };
+    return { ranked, index, tolMm: c.tolerance * scale };
   });
   scored.sort((a, b) => {
     const x = a.ranked;
     const y = b.ranked;
     if (x.fits !== y.fits) return x.fits ? -1 : 1;
-    if (differs(x.zHeightMm, y.zHeightMm)) return x.zHeightMm - y.zHeightMm;
-    if (differs(x.contactAreaMm2, y.contactAreaMm2)) return y.contactAreaMm2 - x.contactAreaMm2;
+    const tol = Math.max(a.tolMm, b.tolMm);
+    if (lengthsDiffer(x.zHeightMm, y.zHeightMm, tol)) return x.zHeightMm - y.zHeightMm;
+    if (areasDiffer(x.contactAreaMm2, y.contactAreaMm2, tol)) return y.contactAreaMm2 - x.contactAreaMm2;
     return a.index - b.index;
   });
-  const seen = new Set<string>();
-  const out: RankedOrientation[] = [];
-  for (const { ranked } of scored) {
-    const [a, b] = [ranked.sizeMm[0], ranked.sizeMm[1]].sort((p, q) => p - q);
-    const key = [ranked.zHeightMm, a!, b!, ranked.contactAreaMm2].map(sig).join('|');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(ranked);
-    if (out.length >= top) break;
+  const kept: { ranked: RankedOrientation; tolMm: number }[] = [];
+  const footprint = (o: RankedOrientation): [number, number] => {
+    const [a, b] = [o.sizeMm[0], o.sizeMm[1]].sort((p, q) => p - q);
+    return [a!, b!];
+  };
+  for (const { ranked, tolMm } of scored) {
+    const [a, b] = footprint(ranked);
+    const same = kept.some((k) => {
+      const tol = Math.max(k.tolMm, tolMm);
+      const [ka, kb] = footprint(k.ranked);
+      return (
+        !lengthsDiffer(k.ranked.zHeightMm, ranked.zHeightMm, tol) &&
+        !lengthsDiffer(ka, a, tol) &&
+        !lengthsDiffer(kb, b, tol) &&
+        !areasDiffer(k.ranked.contactAreaMm2, ranked.contactAreaMm2, tol)
+      );
+    });
+    if (same) continue;
+    kept.push({ ranked, tolMm });
+    if (kept.length >= top) break;
   }
-  return out;
+  return kept.map((k) => k.ranked);
 }
 
 /** `orientCandidates` then `rankOrientations`: the top orientations for this mesh. */

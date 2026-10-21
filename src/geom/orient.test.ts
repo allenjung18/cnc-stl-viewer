@@ -348,6 +348,33 @@ describe('rankOrientations', () => {
     expect(rankOrientations(cands, { scale: 1, top: 1 })).toHaveLength(1);
   });
 
+  it('a part read at an angle, far off the origin, lists each way up once despite float32 noise', () => {
+    // a 10 × 20 × 60 box tilted about Y and stored as float32: the axis turns keep the tilt, the face turns
+    // find its sides, and a side turned over has the same Z, footprint and contact to within noise only
+    const tilted = (offset: number, deg: number, aboutX = 0): Float32Array => {
+      const a = (deg * Math.PI) / 180;
+      const [c, s] = [Math.cos(a), Math.sin(a)];
+      const [cx, sx] = [Math.cos((aboutX * Math.PI) / 180), Math.sin((aboutX * Math.PI) / 180)];
+      const pts = boxTriangles([0, 0, 0], [10, 20, 60]).flat(1).map(([x, y, z]) => {
+        const [x1, z1] = [c * x + s * z, -s * x + c * z]; // about Y
+        return [x1 + offset, cx * y - sx * z1 + offset, sx * y + cx * z1 + offset]; // then about X
+      });
+      return new Float32Array(pts.flat());
+    };
+    // the last two: tilted about two axes far off the origin, so float32 rounding bends every face out of plane
+    for (const [offset, deg, aboutX] of [[0, 30, 0], [500, 30, 0], [500, 17.3, 0], [1e4, 30, 0], [0, 0.4, 0], [1e4, 30, 20], [3e4, 17.3, 41]] as const) {
+      const top = autoOrient(tilted(offset, deg, aboutX), { scale: 1, fitOf: fitWith(autoStock) });
+      const heights = top.map((o) => o.zHeightMm);
+      expect(heights, `offset ${offset}, ${deg}°: ${heights}`).toHaveLength(3);
+      // lowest first, and no way up listed twice: each height clears the one before it by more than the noise
+      const eps = Math.max(1e-3, 1e-7 * offset); // float32 holds a coordinate of 3e4 to about 2e-3
+      expect(Math.abs(heights[0]! - 10), `offset ${offset}, ${deg}°: ${heights}`).toBeLessThan(eps);
+      for (let i = 1; i < 3; i++) expect(heights[i]! - heights[i - 1]!, `offset ${offset}, ${deg}°: ${heights}`).toBeGreaterThan(eps);
+      if (deg === 30 && aboutX === 0) expect(Math.abs(heights[1]! - 20), `offset ${offset}: ${heights}`).toBeLessThan(1e-3); // on its 10 × 60 side
+      expect(top[0]!.contactAreaMm2, `offset ${offset}, ${deg}°`).toBeCloseTo(1200, 1);
+    }
+  });
+
   it('refuses a scale that is not a finite number above 0', () => {
     for (const scale of [0, -1, NaN, Infinity]) expect(() => rankOrientations(cands, { scale })).toThrow(RangeError);
   });
