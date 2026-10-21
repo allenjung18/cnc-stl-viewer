@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { BBox } from '../state/model';
 import { DEFAULT_PROFILE } from '../state/profiles';
 import { envelopeBounds } from './scene';
-import { boxCentre, createCamera } from './viewport';
+import { boxCentre, createCamera, frameHome } from './viewport';
 
 function corners(b: BBox): Vector3[] {
   const out: Vector3[] = [];
@@ -38,6 +38,16 @@ describe('createCamera', () => {
 
   it.each([16 / 9, 1, 9 / 16])('keeps every corner of the frame in view at aspect %f', (aspect) => {
     const cam = createCamera(aspect, frame);
+    const frustum = new Frustum().setFromProjectionMatrix(
+      new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse),
+    );
+    for (const c of corners(frame)) expect(frustum.containsPoint(c)).toBe(true);
+  });
+
+  it('re-frames for a narrower window: a 16:9 camera reset to 9:16 still shows every corner', () => {
+    const cam = createCamera(16 / 9, frame);
+    frameHome(cam, 9 / 16, frame);
+    expect(cam.aspect).toBeCloseTo(9 / 16, 9);
     const frustum = new Frustum().setFromProjectionMatrix(
       new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse),
     );

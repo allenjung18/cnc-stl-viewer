@@ -4,6 +4,7 @@ interface Probe {
   names: string[];
   up: number[];
   cameraPos: number[];
+  aspect: number;
   drawCalls: number;
   canvas: { w: number; h: number };
 }
@@ -15,7 +16,7 @@ async function probe(page: Page): Promise<Probe> {
       __stlViewer: {
         machine: { scene: { traverse(fn: (o: { name: string }) => void): void } };
         viewport: {
-          camera: { up: { toArray(): number[] }; position: { toArray(): number[] } };
+          camera: { up: { toArray(): number[] }; position: { toArray(): number[] }; aspect: number };
           renderer: { info: { render: { calls: number } }; domElement: HTMLCanvasElement };
         };
       };
@@ -27,6 +28,7 @@ async function probe(page: Page): Promise<Probe> {
       names,
       up: h.viewport.camera.up.toArray(),
       cameraPos: h.viewport.camera.position.toArray(),
+      aspect: h.viewport.camera.aspect,
       drawCalls: h.viewport.renderer.info.render.calls,
       canvas: { w: c.width, h: c.height },
     };
@@ -52,6 +54,13 @@ test('the machine scene renders Z-up and orbits on drag', async ({ page }) => {
   expect(before.canvas.h).toBeGreaterThan(0);
   await canvas.screenshot({ path: test.info().outputPath('viewport-home.png') });
 
+  // Before the user moves the view, a resize re-frames the home view for the new shape.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await probe(page)).aspect).toBeCloseTo(390 / 844, 3);
+  const narrow = await probe(page);
+  expect(narrow.cameraPos).not.toEqual(before.cameraPos);
+  await canvas.screenshot({ path: test.info().outputPath('viewport-narrow.png') });
+
   const box = await canvas.boundingBox();
   if (!box) throw new Error('canvas has no bounding box');
   const cx = box.x + box.width / 2;
@@ -61,7 +70,7 @@ test('the machine scene renders Z-up and orbits on drag', async ({ page }) => {
   await page.mouse.move(cx + 150, cy + 40, { steps: 10 });
   await page.mouse.up();
 
-  await expect.poll(async () => (await probe(page)).cameraPos).not.toEqual(before.cameraPos);
+  await expect.poll(async () => (await probe(page)).cameraPos).not.toEqual(narrow.cameraPos);
   const after = await probe(page);
   expect(after.up).toEqual([0, 0, 1]);
   await canvas.screenshot({ path: test.info().outputPath('viewport-orbited.png') });

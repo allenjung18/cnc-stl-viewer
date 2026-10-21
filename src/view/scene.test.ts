@@ -2,7 +2,7 @@ import { Box3, BufferAttribute, LineSegments, Object3D, Vector3, type Mesh } fro
 import { describe, expect, it } from 'vitest';
 import type { MachineProfile } from '../state/model';
 import { DEFAULT_PROFILE } from '../state/profiles';
-import { AXES_LENGTH_MM, buildScene, envelopeBounds } from './scene';
+import { AXES_LENGTH_MM, buildBedGrid, buildScene, envelopeBounds } from './scene';
 
 const EPS = 1e-6;
 
@@ -127,5 +127,24 @@ describe('envelope boxes follow the profile, not fixed numbers', () => {
     expectVec(cut.max, 120, 85, 40);
     expectVec(new Box3().setFromObject(m.travelBox).getSize(new Vector3()), 300, 180, 90);
     expectVec(new Box3().setFromObject(m.grid).max, 120, 85, 0);
+  });
+});
+
+describe('buildBedGrid refuses sizes it cannot draw', () => {
+  it.each([
+    ['zero pitch', 203, 203, 0, 50],
+    ['negative size', -1, 203, 10, 50],
+    ['zero size', 0, 203, 10, 50],
+    ['infinite size', Infinity, 203, 10, 50],
+    ['NaN size', 203, NaN, 10, 50],
+    ['too many lines', 1e12, 203, 10, 50],
+    ['tiny pitch', 203, 203, 1e-9, 50],
+  ])('throws on %s instead of hanging', (_label, sx, sy, minor, major) => {
+    expect(() => buildBedGrid(sx, sy, minor, major)).toThrow(RangeError);
+  });
+
+  it('still draws a bed smaller than one grid pitch', () => {
+    const grid = buildBedGrid(5, 5, 10, 50);
+    expectVec(new Box3().setFromObject(grid).max, 5, 5, 0);
   });
 });

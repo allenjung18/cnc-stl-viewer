@@ -24,19 +24,30 @@ const FOV_DEG = 40;
 export function createCamera(aspect: number, frame: BBox): PerspectiveCamera {
   applyZUp();
   const camera = new PerspectiveCamera(FOV_DEG, aspect, 1, 10_000);
+  frameHome(camera, aspect, frame);
+  return camera;
+}
+
+/**
+ * Puts `camera` in the home view for `frame` at this aspect ratio: looking at the
+ * frame's centre from the front-right, above the bed, far enough back that every
+ * corner of the frame is in view.
+ */
+export function frameHome(camera: PerspectiveCamera, aspect: number, frame: BBox): void {
   const target = boxCentre(frame);
   const radius = new Vector3(
     frame.max[0] - frame.min[0],
     frame.max[1] - frame.min[1],
     frame.max[2] - frame.min[2],
   ).length() / 2;
-  const vHalf = ((FOV_DEG / 2) * Math.PI) / 180;
+  const vHalf = ((camera.fov / 2) * Math.PI) / 180;
   const hHalf = Math.atan(Math.tan(vHalf) * aspect);
   const distance = (radius / Math.sin(Math.min(vHalf, hHalf))) * 1.05;
+  camera.aspect = aspect;
   camera.position.copy(target).addScaledVector(HOME_DIRECTION, distance);
   camera.lookAt(target);
+  camera.updateProjectionMatrix();
   camera.updateMatrixWorld(true);
-  return camera;
 }
 
 /** Renderer, camera and orbit controls bound to one container element. Renders on demand. */
@@ -46,11 +57,13 @@ export class Viewport {
   readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private frameRequested = false;
+  /** Until the user orbits, pans or zooms, a resize re-frames the home view for the new aspect. */
+  private userMoved = false;
 
   constructor(
     private readonly container: HTMLElement,
     private readonly scene: Scene,
-    frame: BBox,
+    private readonly frame: BBox,
   ) {
     this.renderer = new WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -62,6 +75,9 @@ export class Viewport {
     this.controls.target.copy(boxCentre(frame));
     this.controls.update();
     this.controls.addEventListener('change', () => this.requestRender());
+    this.controls.addEventListener('start', () => {
+      this.userMoved = true;
+    });
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -81,8 +97,14 @@ export class Viewport {
     const width = Math.max(1, this.container.clientWidth);
     const height = Math.max(1, this.container.clientHeight);
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    if (this.userMoved) {
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+    } else {
+      frameHome(this.camera, width / height, this.frame);
+      this.controls.target.copy(boxCentre(this.frame));
+      this.controls.update();
+    }
     this.requestRender();
   }
 

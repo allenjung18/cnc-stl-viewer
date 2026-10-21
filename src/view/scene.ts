@@ -124,6 +124,12 @@ function buildBedPlate(sizeX: number, sizeY: number): Mesh {
  * every `minor` mm, heavier every `major` mm, plus the bed's far edges.
  */
 export function buildBedGrid(sizeX: number, sizeY: number, minor: number, major: number): Group {
+  for (const [label, v] of [['sizeX', sizeX], ['sizeY', sizeY], ['minor', minor], ['major', major]] as const) {
+    if (!Number.isFinite(v) || v <= 0) throw new RangeError(`bed grid ${label} must be a finite number > 0, got ${v}`);
+  }
+  if (sizeX / minor > 10_000 || sizeY / minor > 10_000) {
+    throw new RangeError(`bed grid would need more than 10000 lines per axis (${sizeX} x ${sizeY} at ${minor} mm)`);
+  }
   const minorPts: number[] = [];
   const majorPts: number[] = [];
   const pushLine = (pts: number[], x1: number, y1: number, x2: number, y2: number) => {
