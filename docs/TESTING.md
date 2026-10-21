@@ -11,7 +11,7 @@ Two layers, both run from `package.json` scripts. Run both before you trust a ch
 
 ## Unit tests (Vitest)
 
-Vitest runs in Node (`environment: 'node'`): no browser, no WebGL. Each module `x.ts` has an `x.test.ts` next to it (for example `src/geom/fit.test.ts` for `fit.ts`). The `geom` and `io` tests build their inputs in memory with the helpers exported from `test/fixtures/tiny-generator.ts` (`boxTriangles`, `reversed`, `gridCubeStl`, and the binary, ASCII and 3MF writers). The `view` tests build three.js objects without rendering. The parse tests also check that the committed fixture files still equal what the generator produces.
+Vitest runs in Node (`environment: 'node'`): no browser, no WebGL. Most modules `x.ts` have an `x.test.ts` next to them (for example `src/geom/fit.test.ts` for `fit.ts`); `src/main.ts`, `src/ui/dropzone.ts`, `src/io/parse.worker.ts` and the types-only `src/state/model.ts` have none, and the dropzone and `main.ts` wiring are covered by the Playwright specs. The `geom` and `io` tests build their inputs in memory with the helpers exported from `test/fixtures/tiny-generator.ts` (`boxTriangles`, `reversed`, `gridCubeStl`, and the binary, ASCII and 3MF writers). The `view` tests build three.js objects without rendering. The parse tests also check that the committed fixture files still equal what the generator produces.
 
 One test is large: `src/io/large.test.ts` builds a 1 M-triangle STL in memory (about 50 MB, never written to disk) and runs it through `handleParseRequest`, the function the Web Worker runs. It checks the counts, the progress messages every `PROGRESS_EVERY` triangles, the outline, and the 2,000,000-triangle cut-off (`outlineByDefault`). It logs the parse and inspect times but does not assert on them, and has a 120 s timeout, so a slow machine makes it slow, not red.
 
@@ -41,15 +41,15 @@ Big files are never committed. `gridCubeStl(n, size)` (also exported from the ge
 | Spec | What it proves |
 | --- | --- |
 | `viewport.spec.ts` | the machine scene renders Z-up and orbits on drag |
-| `dropzone.spec.ts` | dropping each cube format shows 12 triangles and puts the cube in its stock, not centred; a truncated file shows an error and leaves the previous part; the Open button's file picker loads a file too |
-| `inspector.spec.ts` | the panel for each cube format (size, volume, area, triangles, vertices, watertight); `open-box.stl` shows 4 open edges in red; `bowtie.stl` shows 1 non-manifold edge in magenta; `cube-reversed-winding.stl` shows the flipped flag; the overlays follow the next part |
+| `dropzone.spec.ts` | dropping the binary and the ASCII cube shows 12 triangles and puts the cube in its stock, not centred; a truncated file shows an error and leaves the previous part; the Open button's file picker loads a file too |
+| `inspector.spec.ts` | the panel for the binary and the ASCII cube (size, volume, area, triangles, vertices, watertight); `open-box.stl` shows 4 open edges in red; `bowtie.stl` shows 1 non-manifold edge in magenta; `cube-reversed-winding.stl` shows the flipped flag; the overlays follow the next part |
 | `units.spec.ts` | `inch-cube.stl` shows the "looks like inches" hint, the toggle rescales size, volume and mesh, and the choice survives a reload; the 20 mm cube shows no hint, and as inches it says it does not fit |
 | `stock.spec.ts` | the 20 mm cube gets a 26 x 26 x 23 stock with the WCS marker on its front-left top; a 25 mm fixed block fails X and Y by 1 mm and the stock turns red; a 210 mm block fails the cutting area in X; a keep-out box under the stock is flagged and drawn; an empty or overflowing input is refused, never a pass; the centre origin moves the marker |
 | `orient.spec.ts` | every rotation re-runs the fit (`box-10x20x80.stl` is too tall as read and fits after a quarter turn about X; four turns about Z come back exactly); auto-orient lists the top three and applies nothing until asked; lay flat puts a clicked face on the bed; a new file starts as read |
 | `views.spec.ts` | key 1 then O gives an orthographic camera looking down -Z with +Y up; keys 2-4 and the buttons show front, right and iso; a key typed into a field is the field's |
 | `measure.spec.ts` | two-point measure between opposite corners of the 20 mm cube reads 20 x sqrt(3), with a label; Esc clears it |
 | `persist.spec.ts` | stock inputs and origin survive a reload; a corrupt stored profile falls back to the defaults; export, edit, import applies at once and a bad file changes nothing; the setup sheet reaches the clipboard; export with an invalid input exports nothing |
-| `scale.spec.ts` | 3MF reads its unit (a 1-inch 3MF reads 25.4 mm) and the STL units choice is kept; 20 drops leave as many GPU geometries, textures and programs as two; the outline toggle; the thinnest-slab hint and the tool diameter surviving a reload; the 500 MB refusal; the 100 MB load |
+| `scale.spec.ts` | 3MF reads its unit (the 3MF cube reads its stats and a 1-inch 3MF reads 25.4 mm) and the STL units choice is kept; 20 drops leave as many GPU geometries, textures and programs as two; the outline toggle; the thinnest-slab hint and the tool diameter surviving a reload; the 500 MB refusal; the 100 MB load |
 
 ### The 500 MB and 100 MB tests
 

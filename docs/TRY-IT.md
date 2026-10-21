@@ -17,14 +17,14 @@ The machine is drawn to scale: the cutting area (yellow) inside the travel box (
 
 | Drop this | You should see |
 | --- | --- |
-| `cube-20mm-binary.stl` | the status "Loaded cube-20mm-binary.stl."; size 20 x 20 x 20 mm, volume 8,000 mm^3, area 2,400 mm^2, 12 triangles, 8 vertices, watertight yes, normals outward; a 26 x 26 x 23 mm stock (default allowance 3 mm a side, 1 mm on top, 2 mm under) around the cube, the cube not centred on the bed but sitting in its stock at the front-left corner, and the verdict "fits" |
+| `cube-20mm-binary.stl` | the status "Loaded cube-20mm-binary.stl."; size 20 x 20 x 20 mm, volume 8,000 mm^3, area 2,400 mm^2, 12 triangles, 8 vertices, watertight yes, normals outward; a 26 x 26 x 23 mm stock (default allowance 3 mm a side, 1 mm on top, 2 mm under) around the cube, the cube not centred on the bed but sitting in its stock at the front-left corner, and the verdict starting "fits" |
 | `cube-20mm-ascii.stl` | the same numbers; the format row says ASCII STL |
 | `cube-20mm.3mf` | the same numbers; the units line reads "mm (from the file)" and the toggle reads "Set by the file" and is disabled |
 | `cube-1in.3mf` | size 25.4 x 25.4 x 25.4 mm: the file states inches, so the units line reads "inch (from the file, x25.4 to mm)" |
 | `inch-cube.stl` | size 1 x 1 x 1 mm and the hint "looks like inches" (see below) |
 | `open-box.stl` | watertight no, 4 open edges, drawn in red along the rim of the missing top face |
 | `bowtie.stl` | 1 non-manifold edge, drawn in magenta |
-| `cube-reversed-winding.stl` | volume -8,000 mm^3 and "inward (flipped): the volume is negative" in the Normals row |
+| `cube-reversed-winding.stl` | volume "8,000 mm³ (computed −8,000: normals inward)" and "inward (flipped): the volume is negative" in the Normals row |
 | `box-10x20x80.stl` | 10 x 20 x 80 mm; the verdict is red: "stock exceeds cutting area Z by 7.0 mm" (80 + 1 + 2 = 83 against a 76 mm cutting height) |
 
 Dropping a second file replaces the first. A truncated or unreadable file shows an error in red and leaves the part that was there.
