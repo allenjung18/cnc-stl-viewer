@@ -118,6 +118,16 @@ describe('volume and area', () => {
     expect(stats.size).toEqual([10, 10, 0]);
   });
 
+  it('an open mesh wound outward is not flagged flipped, even when its volume sum is negative', () => {
+    // A 100 x 100 plate at z = 0 and a 1 x 1 tab at z = 100, every normal +Z: the sum about the box centre is negative.
+    const plate = boxTriangles([0, 0, 0], [100, 100, 0]).slice(2, 4);
+    const tab = boxTriangles([0, 0, 100], [1, 1, 0]).slice(2, 4);
+    const { stats } = inspectMesh(soup([...plate, ...tab]));
+    expect(stats.volumeMm3).toBeLessThan(0);
+    expect(stats.watertight).toBe(false);
+    expect(stats.flippedHint).toBe(false);
+  });
+
   it('surfaceArea sums the triangles', () => {
     expect(surfaceArea(Float32Array.from([0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 3, 0, 0, 0, 4]))).toBe(2 + 6);
   });

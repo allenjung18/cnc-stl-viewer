@@ -14,8 +14,10 @@ export interface LoadedStl {
   readonly triangles: number;
   /** x, y, z per vertex, three vertices per triangle, file units and file axes. */
   readonly positions: Float32Array;
-  /** Size, volume, area, counts and the problem edges, computed in the worker. */
-  readonly inspection: MeshInspection;
+  /** Size, volume, area, counts and the problem edges, computed in the worker; null when that failed. */
+  readonly inspection: MeshInspection | null;
+  /** Why the inspection failed, when it did. */
+  readonly inspectionError?: string;
 }
 
 /** The part of a Worker that `loadStl` uses, so tests can stand in for one. */
@@ -86,6 +88,7 @@ export async function loadStl(file: FileLike, options: LoadOptions = {}): Promis
           triangles: msg.triangles,
           positions: msg.positions,
           inspection: msg.inspection,
+          ...(msg.inspectionError === undefined ? {} : { inspectionError: msg.inspectionError }),
         });
       } else {
         finish();

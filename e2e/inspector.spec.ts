@@ -97,6 +97,7 @@ test('open-box.stl: 4 open edges, drawn in red along the rim of the missing top'
     'open-edges': '4',
     'non-manifold-edges': '0',
     volume: /^≈ .* mm³ \(mesh is open\)$/,
+    normals: 'not judged: the mesh is not closed',
   });
   await expect(field(page, 'open-edges')).toHaveAttribute('data-tone', 'bad');
   await expect(page.locator('#part-info .swatch')).toHaveCount(1);

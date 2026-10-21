@@ -43,7 +43,7 @@ export function weldVertices(positions: ArrayLike<number>, box: BBox, eps: numbe
   if (k ** 3 > Number.MAX_SAFE_INTEGER) throw new RangeError(`weld tolerance ${eps} is too small for a part of extent ${extent}`);
   const [mx, my, mz] = box.min;
   const index = new Uint32Array(n);
-  const seen = new Map<number, number>();
+  const seen = new ShardedMap();
   const vertices = new Float64Array(positions.length);
   let count = 0;
   for (let v = 0; v < n; v++) {
@@ -87,7 +87,7 @@ export function analyseTopology(positions: ArrayLike<number>, box: BBox, eps: nu
   }
   const welded = weldVertices(positions, box, eps);
   const { index, vertices: wv, count: nv } = welded;
-  const edges = new Map<number, number>();
+  const edges = new ShardedMap();
   const addEdge = (a: number, b: number): void => {
     const key = a < b ? a * nv + b : b * nv + a;
     edges.set(key, (edges.get(key) ?? 0) + 1);
@@ -108,7 +108,7 @@ export function analyseTopology(positions: ArrayLike<number>, box: BBox, eps: nu
 
   const open: number[] = [];
   const nonManifold: number[] = [];
-  for (const [key, uses] of edges) {
+  for (const [key, uses] of edges.entries()) {
     if (uses === 2) continue;
     const a = Math.floor(key / nv);
     const b = key - a * nv;
@@ -139,9 +139,48 @@ export function triangleArea(p: ArrayLike<number>, at: number): number {
 }
 
 /**
- * The triangles are wound inward: the signed volume is negative beyond
- * rounding noise. A flat or empty mesh (volume ~0) is never flagged.
+ * The triangles are wound inward: the mesh is watertight and its signed volume
+ * is negative beyond rounding noise. A flat or empty mesh (volume ~0) and an
+ * open mesh are never flagged.
  */
-export function flippedHint(volume: number, box: BBox): boolean {
-  return volume < -1e-9 * diagonalOf(box) ** 3;
+export function flippedHint(volume: number, box: BBox, watertight: boolean): boolean {
+  // On an open mesh the sum depends on the reference point, so its sign says nothing about the winding.
+  return watertight && volume < -1e-9 * diagonalOf(box) ** 3;
+}
+
+/** One V8 Map holds at most 2^24 entries; this many shards keep each far below that for any file under the size limit. */
+export const MAP_SHARDS = 16;
+
+/**
+ * A number -> number map split over several Maps, so a mesh with more than
+ * 2^24 distinct vertices or edges (a 500 MB STL can have 31 M of either) does
+ * not hit V8's per-Map limit. Keys are non-negative integers below 2^53.
+ */
+export class ShardedMap {
+  private readonly shards: Map<number, number>[];
+  constructor(shards = MAP_SHARDS) {
+    if (!(Number.isInteger(shards) && shards > 0)) throw new RangeError(`shard count must be a positive integer, got ${shards}`);
+    this.shards = Array.from({ length: shards }, () => new Map<number, number>());
+  }
+  private shard(key: number): Map<number, number> {
+    return this.shards[key % this.shards.length]!;
+  }
+  get(key: number): number | undefined {
+    return this.shard(key).get(key);
+  }
+  set(key: number, value: number): void {
+    this.shard(key).set(key, value);
+  }
+  get size(): number {
+    let n = 0;
+    for (const m of this.shards) n += m.size;
+    return n;
+  }
+  /** Largest single shard, for tests. */
+  get largestShard(): number {
+    return Math.max(...this.shards.map((m) => m.size));
+  }
+  *entries(): IterableIterator<[number, number]> {
+    for (const m of this.shards) yield* m.entries();
+  }
 }

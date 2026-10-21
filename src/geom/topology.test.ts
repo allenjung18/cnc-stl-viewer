@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { boxTriangles, reversed } from '../../test/fixtures/tiny-generator';
 import { bboxOf } from './bbox';
-import { analyseTopology, flippedHint, MIN_WELD_EPSILON, weldEpsilon, weldVertices } from './topology';
+import { analyseTopology, flippedHint, MIN_WELD_EPSILON, ShardedMap, weldEpsilon, weldVertices } from './topology';
 
 const soup = (tris: readonly (readonly (readonly number[])[])[]): Float32Array => Float32Array.from(tris.flat(2));
 const topo = (p: Float32Array) => {
@@ -96,10 +96,40 @@ describe('analyseTopology', () => {
 describe('flippedHint', () => {
   const box = { min: [0, 0, 0], max: [10, 10, 10] } as const;
   it('flags a clearly negative volume only', () => {
-    expect(flippedHint(-1000, box)).toBe(true);
-    expect(flippedHint(1000, box)).toBe(false);
-    expect(flippedHint(0, box)).toBe(false);
-    expect(flippedHint(-0, box)).toBe(false);
-    expect(flippedHint(-1e-12, box)).toBe(false); // rounding noise on a flat mesh
+    expect(flippedHint(-1000, box, true)).toBe(true);
+    expect(flippedHint(1000, box, true)).toBe(false);
+    expect(flippedHint(0, box, true)).toBe(false);
+    expect(flippedHint(-0, box, true)).toBe(false);
+    expect(flippedHint(-1e-12, box, true)).toBe(false); // rounding noise on a flat mesh
+  });
+
+  it('never flags an open mesh, whatever the sign of its volume', () => {
+    expect(flippedHint(-1000, box, false)).toBe(false);
+  });
+});
+
+describe('ShardedMap', () => {
+  it('gets, sets, counts and iterates across its shards', () => {
+    const m = new ShardedMap(4);
+    for (let k = 0; k < 1000; k++) m.set(k * 7, k);
+    m.set(7, -1); // overwrite, not a new entry
+    expect(m.size).toBe(1000);
+    expect(m.get(7)).toBe(-1);
+    expect(m.get(14)).toBe(2);
+    expect(m.get(15)).toBeUndefined();
+    expect(m.largestShard).toBe(250); // spread evenly, not piled in one Map
+    expect([...m.entries()]).toHaveLength(1000);
+  });
+
+  it('places keys near 2^53 too', () => {
+    const m = new ShardedMap();
+    const big = Number.MAX_SAFE_INTEGER;
+    m.set(big, 1);
+    m.set(big - 1, 2);
+    expect([m.get(big), m.get(big - 1)]).toEqual([1, 2]);
+  });
+
+  it('refuses a shard count that is not a positive integer', () => {
+    for (const n of [0, -1, 1.5, Number.NaN]) expect(() => new ShardedMap(n)).toThrow(RangeError);
   });
 });

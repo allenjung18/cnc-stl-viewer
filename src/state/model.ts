@@ -49,7 +49,7 @@ export interface MeshStats {
   readonly nonManifoldEdges: number;
   /** Triangles that collapse when welded, or whose area is below weldEpsilon². */
   readonly degenerateTris: number;
-  /** The volume is negative: the triangles are wound inward. */
+  /** Watertight and the volume is negative: the triangles are wound inward. Never set on an open mesh. */
   readonly flippedHint: boolean;
   /** The welding tolerance used, file units. */
   readonly weldEpsilon: number;

@@ -87,12 +87,24 @@ export function partRows({ name, format, stats: s }: PartSummary, colours: { ope
       value: count(s.degenerateTris),
       tone: s.degenerateTris > 0 ? 'warn' : undefined,
     },
-    {
-      key: 'normals',
-      label: 'Normals',
-      value: s.flippedHint ? 'inward (flipped): the volume is negative' : 'outward',
-      tone: s.flippedHint ? 'bad' : 'ok',
-    },
+    s.watertight
+      ? {
+          key: 'normals',
+          label: 'Normals',
+          value: s.flippedHint ? 'inward (flipped): the volume is negative' : 'outward',
+          tone: s.flippedHint ? 'bad' : 'ok',
+        }
+      : { key: 'normals', label: 'Normals', value: 'not judged: the mesh is not closed', tone: 'warn' },
+  ];
+}
+
+/** The rows for a part that loaded but could not be inspected. */
+export function uninspectedRows(name: string, format: StlFormat, triangles: number, reason: string): PanelRow[] {
+  return [
+    { key: 'name', label: 'Part', value: name },
+    { key: 'format', label: 'Format', value: format === 'stl-bin' ? 'binary STL' : 'ASCII STL' },
+    { key: 'triangles', label: 'Triangles', value: count(triangles) },
+    { key: 'inspection', label: 'Inspection', value: `not run: ${reason}`, tone: 'warn' },
   ];
 }
 

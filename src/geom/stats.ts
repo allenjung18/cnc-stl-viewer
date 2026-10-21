@@ -54,7 +54,7 @@ export function inspectMesh(positions: ArrayLike<number>): MeshInspection {
       openEdges: topo.openEdges,
       nonManifoldEdges: topo.nonManifoldEdges,
       degenerateTris: topo.degenerateTris,
-      flippedHint: flippedHint(volume, bbox),
+      flippedHint: flippedHint(volume, bbox, topo.watertight),
       weldEpsilon: eps,
     },
     openEdgeSegments: topo.openEdgeSegments,

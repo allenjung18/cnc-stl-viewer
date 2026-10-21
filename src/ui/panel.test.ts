@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { inspectMesh } from '../geom/stats';
 import { parseStl } from '../io/parse';
-import { formatNumber, partRows, type PanelRow } from './panel';
+import { formatNumber, partRows, uninspectedRows, type PanelRow } from './panel';
 
 const COLOURS = { open: '#ff3b30', nonManifold: '#ff3df5' };
 
@@ -51,6 +51,7 @@ describe('partRows', () => {
     expect(r['non-manifold-edges']!).toMatchObject({ value: '1', tone: 'bad', swatch: COLOURS.nonManifold });
     expect(r['open-edges']!.value).toBe('0');
     expect(r.vertices!.value).toBe('14');
+    expect(r.normals!).toMatchObject({ value: 'not judged: the mesh is not closed', tone: 'warn' });
     expect(r.volume!.value).toBe('≈ 2,000 mm³ (mesh is not manifold)');
   });
 
@@ -74,6 +75,19 @@ describe('partRows', () => {
     expect(r.size!.value).toBe('1 × 1 × 1 mm');
     expect(r.volume!.value).toBe('1 mm³');
     expect(r.area!.value).toBe('6 mm²');
+  });
+});
+
+describe('uninspectedRows', () => {
+  it('names the part and says why it was not inspected', () => {
+    const rows = uninspectedRows('huge.stl', 'stl-bin', 6_000_000, 'Map maximum size exceeded');
+    expect(rows.map((r) => [r.key, r.value])).toEqual([
+      ['name', 'huge.stl'],
+      ['format', 'binary STL'],
+      ['triangles', '6,000,000'],
+      ['inspection', 'not run: Map maximum size exceeded'],
+    ]);
+    expect(rows[3]!.tone).toBe('warn');
   });
 });
 

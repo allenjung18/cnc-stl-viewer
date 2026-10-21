@@ -140,7 +140,9 @@ export type ParseResponse =
       readonly format: StlFormat;
       readonly triangles: number;
       readonly positions: Float32Array;
-      readonly inspection: MeshInspection;
+      /** null when the inspector failed; the part still loads and `inspectionError` says why. */
+      readonly inspection: MeshInspection | null;
+      readonly inspectionError?: string;
     }
   | { readonly id: number; readonly type: 'error'; readonly message: string };
 
@@ -148,14 +150,25 @@ export type ParseResponse =
 export function handleParseRequest(
   req: ParseRequest,
   post: (msg: ParseResponse, transfer: Transferable[]) => void,
+  inspect: (positions: Float32Array) => MeshInspection = inspectMesh,
 ): void {
   try {
     const parsed = parseStl(req.buffer, (done, total) => post({ id: req.id, type: 'progress', done, total }, []));
     // The inspector runs here too, off the main thread: welding and the edge census are the slow part.
-    const inspection = inspectMesh(parsed.positions);
+    // A file that parsed still loads when the inspector fails (out of memory on a huge mesh, say).
+    let inspection: MeshInspection | null = null;
+    let inspectionError: string | undefined;
+    try {
+      inspection = inspect(parsed.positions);
+    } catch (e) {
+      inspectionError = e instanceof Error ? e.message : String(e);
+    }
+    const base = { id: req.id, type: 'done', format: parsed.format, triangles: parsed.triangles, positions: parsed.positions } as const;
     post(
-      { id: req.id, type: 'done', format: parsed.format, triangles: parsed.triangles, positions: parsed.positions, inspection },
-      [parsed.positions.buffer, inspection.openEdgeSegments.buffer, inspection.nonManifoldEdgeSegments.buffer],
+      inspection ? { ...base, inspection } : { ...base, inspection: null, inspectionError: inspectionError ?? 'unknown error' },
+      inspection
+        ? [parsed.positions.buffer, inspection.openEdgeSegments.buffer, inspection.nonManifoldEdgeSegments.buffer]
+        : [parsed.positions.buffer],
     );
   } catch (e) {
     const message = e instanceof StlError ? e.message : `The file could not be read: ${e instanceof Error ? e.message : String(e)}`;

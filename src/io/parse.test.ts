@@ -121,14 +121,26 @@ describe('handleParseRequest (the worker body)', () => {
     if (msg.type !== 'done') throw new Error(`expected done, got ${msg.type}`);
     expect(msg.id).toBe(7);
     expect(msg.triangles).toBe(12);
-    expect(msg.inspection.stats.vertices).toBe(8);
-    expect(msg.inspection.stats.watertight).toBe(true);
-    expect(transfer).toEqual([
-      msg.positions.buffer,
-      msg.inspection.openEdgeSegments.buffer,
-      msg.inspection.nonManifoldEdgeSegments.buffer,
-    ]);
+    const inspection = msg.inspection!;
+    expect(inspection.stats.vertices).toBe(8);
+    expect(inspection.stats.watertight).toBe(true);
+    expect(transfer).toEqual([msg.positions.buffer, inspection.openEdgeSegments.buffer, inspection.nonManifoldEdgeSegments.buffer]);
     expect(new Set(transfer).size).toBe(3); // a buffer listed twice would make postMessage throw
+  });
+
+  it('a failing inspector still posts the parsed part, with the reason and no inspection', () => {
+    const bytes = fixture('cube-20mm-binary.stl');
+    const posted: [ParseResponse, Transferable[]][] = [];
+    handleParseRequest({ id: 3, buffer: bytes.slice().buffer }, (m, t) => posted.push([m, t]), () => {
+      throw new RangeError('Map maximum size exceeded');
+    });
+    expect(posted).toHaveLength(1);
+    const [msg, transfer] = posted[0]!;
+    if (msg.type !== 'done') throw new Error(`expected done, got ${msg.type}`);
+    expect(msg.triangles).toBe(12);
+    expect(msg.inspection).toBeNull();
+    expect(msg.inspectionError).toBe('Map maximum size exceeded');
+    expect(transfer).toEqual([msg.positions.buffer]);
   });
 
   it('posts a readable error for a truncated file', () => {
