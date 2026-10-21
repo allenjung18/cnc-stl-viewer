@@ -73,6 +73,8 @@ const keepOutMesh = buildKeepOutMesh();
 machine.scene.add(stockMesh.object, keepOutMesh.object);
 let profile: MachineProfile = machineProfile;
 let fit: FitReport | null = null;
+/** Why the fit checks refused the inputs (an overflow), or null. */
+let fitError: string | null = null;
 const stockPanel = new StockPanel(byId('stock'), () => {
   render();
   persist();
@@ -114,14 +116,16 @@ function renderFit(scale: number): void {
     return;
   }
   profile = { ...machineProfile, keepOut: form.keepOut };
+  fitError = null;
   try {
     fit = fitFor(form, partSizeMm(scale));
     keepOutMesh.update(form.keepOut); // drawn only once checkFit has found its corners finite
     part?.setPlacement(fit.partOnBed ?? [0, 0, 0]);
   } catch (e) {
     fit = null;
+    fitError = e instanceof Error ? e.message : String(e);
     stockMesh.update({ stockBox: null, wcs: null, failed: false });
-    stockPanel.show(fitVerdict(null, [e instanceof Error ? e.message : String(e)]), []);
+    stockPanel.show(fitVerdict(null, [fitError]), []);
     return;
   }
   stockMesh.update({ stockBox: fit.stockBox, wcs: fit.wcs, failed: !fit.fits });
@@ -443,7 +447,16 @@ function setMachine(next: MachineProfile): void {
 }
 
 byId('profile-export').addEventListener('click', () => {
-  persist();
+  // Export only what is on screen: an input that cannot be saved is named, and nothing is exported.
+  const next = savedFromForm(stockPanel.read(), machineProfile, saved);
+  if (!next) {
+    const form = readStockForm(stockPanel.read());
+    const why = form.ok ? 'the keep-out box would not read back (its size is lost next to its corner, or overflows)' : form.errors.join('; ');
+    setProfileStatus(`Not exported: ${why}.`, 'bad');
+    return;
+  }
+  saved = next;
+  saveProfile(storage, next);
   const url = URL.createObjectURL(new Blob([profileToJson(saved)], { type: 'application/json' }));
   const a = document.createElement('a');
   a.href = url;
@@ -497,7 +510,8 @@ function currentSheet(): string {
     partSizeMm: partSizeMm(scale),
     rotation: part?.rotation ?? null,
     machine: { ...machineProfile, keepOut: form.ok ? form.keepOut : [] },
-    form: form.ok ? { stock: form.stock, setup: form.setup } : { errors: form.errors },
+    // A check that refused the inputs (an overflow) is reported, never read as "no part".
+    form: !form.ok ? { errors: form.errors } : fitError ? { errors: [fitError] } : { stock: form.stock, setup: form.setup },
     fit: form.ok ? fit : null,
   });
 }

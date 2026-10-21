@@ -156,6 +156,21 @@ describe('formValuesOf and savedFromForm', () => {
     expect(savedFromForm({ ...DEFAULTS, sizeZ: '0' }, DEFAULT_PROFILE, custom)!.stock.size).toEqual(custom.stock.size);
   });
 
+  it('a keep-out width and depth read back as typed, without the float noise of max − min', () => {
+    for (const [x, w] of [['150.1', '20.2'], ['12.7', '25.4'], ['0.1', '0.2']] as const) {
+      const p = savedFromForm({ ...DEFAULTS, keepOutOn: true, keepOutX: x, keepOutY: x, keepOutW: w, keepOutD: w }, DEFAULT_PROFILE, DEFAULT_SAVED_PROFILE)!;
+      const back = formValuesOf(parseProfile(profileToJson(p)).ok ? p : DEFAULT_SAVED_PROFILE);
+      expect([back.keepOutX, back.keepOutW, back.keepOutD]).toEqual([x, w, w]);
+    }
+  });
+
+  it('saves nothing the next visit would refuse: a width lost next to a huge corner, or an overflow', () => {
+    const on = { ...DEFAULTS, keepOutOn: true };
+    expect(savedFromForm({ ...on, keepOutX: '1e12', keepOutW: '1e-9' }, DEFAULT_PROFILE, custom)).toBeNull();
+    expect(savedFromForm({ ...on, keepOutX: '1e308', keepOutW: '1e308' }, DEFAULT_PROFILE, custom)).toBeNull();
+    expect(savedFromForm({ ...on, keepOutX: '1e11', keepOutW: '1e-3' }, DEFAULT_PROFILE, custom)).not.toBeNull();
+  });
+
   it('a keep-out box switched off saves none', () => {
     expect(savedFromForm({ ...formValuesOf(custom), keepOutOn: false }, custom.machine, custom)!.machine.keepOut).toEqual([]);
   });

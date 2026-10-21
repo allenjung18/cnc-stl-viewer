@@ -130,3 +130,31 @@ test('copy setup sheet: stock size, origin and the fit verdict as text on the cl
   await expect(page.getByTestId('setup-sheet')).toBeHidden();
   expect(errors).toEqual([]);
 });
+
+test('export with an invalid input on screen exports nothing and says why', async ({ page }) => {
+  const errors: string[] = [];
+  await ready(page, errors, []);
+  await page.getByTestId('allowance-top').fill('-1');
+  let downloads = 0;
+  page.on('download', () => downloads++);
+  await page.getByTestId('profile-export').click();
+  await expect(page.getByTestId('profile-status')).toHaveText('Not exported: Allowance top must be 0 or more.');
+  expect(downloads).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('the setup sheet names a fit check that refused the inputs, never "load a part"', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const errors: string[] = [];
+  await ready(page, errors, []);
+  await loadCube(page);
+  await page.getByTestId('allowance-xy').fill('1e308');
+  await expect(page.getByTestId('fit-verdict')).toContainText('Not checked:');
+  await page.getByTestId('copy-setup').click();
+  await expect(page.getByTestId('profile-status')).toHaveText('Setup sheet copied to the clipboard.');
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text).toContain('Part: cube-20mm-binary.stl');
+  expect(text.trimEnd().split('\n').at(-1)).toMatch(/^Not checked: /);
+  expect(text).not.toContain('Load a part');
+  expect(errors).toEqual([]);
+});

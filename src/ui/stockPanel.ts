@@ -7,7 +7,7 @@
  */
 import { failureText, formatMm, type FitReport } from '../geom/fit';
 import type { BBox, MachineProfile, Setup, Stock, Vec3, WcsOrigin } from '../state/model';
-import type { SavedProfile } from '../state/profiles';
+import { parseProfile, profileToJson, type SavedProfile } from '../state/profiles';
 import { formatNumber, type PanelRow, type RowTone } from './panel';
 
 /** The raw input values, as the page holds them. */
@@ -82,6 +82,8 @@ export const KEEP_OUT_FIELD_DEFAULTS = Object.freeze({ keepOutX: '0', keepOutY: 
 /** The inputs that show a saved profile. */
 export function formValuesOf(p: SavedProfile): StockFormValues {
   const s = String;
+  // A width is stored as max − min; 15 significant digits drop the float noise of the subtraction (150.1 + 20.2 − 150.1).
+  const span = (hi: number, lo: number): string => String(Number((hi - lo).toPrecision(15)));
   const box = p.machine.keepOut?.[0];
   return {
     mode: p.stock.mode,
@@ -99,8 +101,8 @@ export function formValuesOf(p: SavedProfile): StockFormValues {
       ? {
           keepOutX: s(box.min[0]),
           keepOutY: s(box.min[1]),
-          keepOutW: s(box.max[0] - box.min[0]),
-          keepOutD: s(box.max[1] - box.min[1]),
+          keepOutW: span(box.max[0], box.min[0]),
+          keepOutD: span(box.max[1], box.min[1]),
           keepOutH: s(box.max[2]),
         }
       : KEEP_OUT_FIELD_DEFAULTS),
@@ -109,7 +111,9 @@ export function formValuesOf(p: SavedProfile): StockFormValues {
 
 /**
  * The profile to save for these inputs on `machine`, or null while an input is
- * invalid (the last good profile stays saved). In auto mode the block size is
+ * invalid, or when the profile would not read back (a keep-out box whose
+ * width vanishes next to a huge corner, or overflows: the next visit would
+ * refuse it and lose every setting). In auto mode the block size is
  * not checked by the form; it is kept from the inputs when they hold a valid
  * size, else from `previous`.
  */
@@ -121,11 +125,12 @@ export function savedFromForm(values: StockFormValues, machine: MachineProfile, 
     const block = readStockForm({ ...values, mode: 'fixed' });
     size = block.ok ? block.stock.size : previous.stock.size;
   }
-  return {
+  const next: SavedProfile = {
     machine: { ...machine, keepOut: form.keepOut },
     stock: { ...form.stock, size },
     setup: form.setup,
   };
+  return parseProfile(profileToJson(next)).ok ? next : null;
 }
 
 export interface FitVerdict {
