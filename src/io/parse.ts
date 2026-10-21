@@ -91,6 +91,10 @@ function parseAscii(bytes: Uint8Array, onProgress?: ProgressFn): Float32Array {
         if (t === null || t === '' || !Number.isFinite(v)) {
           throw new StlError(`Vertex ${count / 3 + 1} has a coordinate that is not a number: "${t ?? 'end of file'}".`);
         }
+        // Stored as float32: a finite double such as 1e39 would become Infinity.
+        if (!Number.isFinite(Math.fround(v))) {
+          throw new StlError(`Vertex ${count / 3 + 1} has a coordinate too large to store: "${t}".`);
+        }
         positions[count++] = v;
       }
     } else if (word === 'facet') {

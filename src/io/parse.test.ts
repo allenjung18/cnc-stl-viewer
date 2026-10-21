@@ -77,6 +77,11 @@ describe('parseStl', () => {
     expect(() => parseStl(enc(facet(['0 0 0', '1 0 0', '0 1 0', '1 1 0'])))).toThrow(/exactly 3 vertices/);
     expect(() => parseStl(enc(facet(['0 0 0', '1 0 x', '0 1 0'])))).toThrow(/not a number: "x"/);
     expect(() => parseStl(enc(facet(['0 0 0', '1 0 Infinity', '0 1 0'])))).toThrow(StlError);
+    // Finite as a double, Infinity as float32.
+    expect(() => parseStl(enc(facet(['0 0 0', '1e39 0 0', '0 1 0'])))).toThrow(/Vertex 2 has a coordinate too large to store: "1e39"/);
+    expect(() => parseStl(enc(facet(['0 0 0', '0 -3.5e38 0', '0 1 0'])))).toThrow(/too large to store/);
+    // The float32 maximum itself still reads.
+    expect(parseStl(enc(facet(['0 0 0', '3.4e38 0 0', '0 1 0']))).positions[3]).toBe(Math.fround(3.4e38));
     expect(() => parseStl(enc('solid s\nendsolid s\n'))).toThrow(/no triangles/);
   });
 

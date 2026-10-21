@@ -1,7 +1,8 @@
 /// <reference types="node" />
 /**
  * Writes the STL test fixtures in this folder. The files are committed; run
- * `npm run fixtures` after changing anything here, and the parse tests check
+ * `npm run fixtures` (Node 22.18 or later: it runs this .ts file directly)
+ * after changing anything here, and the parse tests check
  * that the committed bytes still match what this file builds.
  *
  * Every coordinate is a small integer, so the ASCII and binary forms of the
